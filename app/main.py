@@ -11,13 +11,13 @@ from app.db.init_db import init_db
 async def lifespan(app: FastAPI):
     init_db()
     yield
-    
+
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version="0.1.0",
     description="Visual Defect Detection AI backend made for upcoming awesome projects, summer 2026.",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 

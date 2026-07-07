@@ -1,4 +1,4 @@
-from fastapi import APIRouter,Depends
+from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,4 @@ def health_check():
 @router.get("/health/db")
 def database_health_check(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
-    return {
-        "status":"ok",
-        "database":"connected"
-    }
+    return {"status": "ok", "database": "connected"}
