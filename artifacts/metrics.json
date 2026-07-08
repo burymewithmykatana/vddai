@@ -1,0 +1,10 @@
+{
+    "accuracy": 0.956140350877193,
+    "f1_score": 0.9655172413793104,
+    "model_type": "RandomForestClassifier",
+    "dataset": "sklearn breast cancer dataset",
+    "target_classes": {
+        "0": "malignant",
+        "1": "benign"
+    }
+}
