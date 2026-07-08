@@ -12,3 +12,5 @@ dev_vddai.db
 
 uploads/
 postgres_data/
+
+artifacts/*.joblib

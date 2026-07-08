@@ -1,26 +1,36 @@
 from pydantic import BaseModel, ConfigDict
 
 
-class PredictionInput(BaseModel):
-    mean_radius: float
-    mean_texture: float
-    mean_perimeter: float
-    mean_area: float
-    mean_smoothness: float
+class PredictionCreate(BaseModel):
+    user_id: int
+    image_path: str
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "mean_radius": 14.2,
-                "mean_texture": 20.5,
-                "mean_perimeter": 90.2,
-                "mean_area": 600.1,
-                "mean_smoothness": 0.1,
+                "user_id": 1,
+                "image_path": "uploads/test_image_001.jpg",
             }
         }
     )
 
 
-class PredictionOutput(BaseModel):
-    prediction: int
-    prediction_label: str
+class PredictionQueuedResponse(BaseModel):
+    prediction_id: int
+    status: str
+    message: str
+
+
+class PredictionRead(BaseModel):
+    id: int
+    user_id: int
+    image_path: str
+    status: str
+    predicted_label: str | None
+    confidence: float | None
+    threshold: float
+    model_version: str
+    latency_ms: int | None
+    error_message: str | None
+
+    model_config = ConfigDict(from_attributes=True)
