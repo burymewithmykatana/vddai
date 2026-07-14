@@ -11,6 +11,9 @@ class PredictionRead(BaseModel):
     id: int
     user_id: int
     image_path: str
+    image_format: str
+    image_width: int
+    image_height: int
     status: str
     predicted_label: str | None
     confidence: float | None

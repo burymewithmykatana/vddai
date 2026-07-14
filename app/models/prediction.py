@@ -31,6 +31,21 @@ class Prediction(Base):
         nullable=False,
     )
 
+    image_format: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    image_width: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    image_height: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
     status: Mapped[str] = mapped_column(
         String(50),
         default=PredictionStatus.QUEUED.value,

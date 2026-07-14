@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+from PIL import Image
 
 # These must be set before importing application modules because
 # the SQLAlchemy engine is created during module import.
@@ -14,15 +15,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.core.config import settings
+from app.core.security import create_access_token
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.main import app
-from app.core.config import settings
-from app.core.security import create_access_token
 from app.models.prediction import Prediction, PredictionStatus
 from app.models.user import User
-from app.services.mock_model_service import mock_model_service
 from app.services.image_storage_service import image_storage_service
+from app.services.mock_model_service import mock_model_service
 from app.workers.prediction_worker import process_next_prediction
 
 
@@ -97,6 +98,9 @@ def create_queued_prediction(db: Session, user_id: int) -> Prediction:
     prediction = Prediction(
         user_id=user_id,
         image_path="uploads/test_image_001.jpg",
+        image_format="JPEG",
+        image_width=16,
+        image_height=16,
         status=PredictionStatus.QUEUED.value,
         model_version="mock-v1",
     )
@@ -148,11 +152,12 @@ def test_create_prediction_job(
             "upload_directory",
             upload_directory,
         )
+        image_contents = create_image_bytes("JPEG")
 
         response = client.post(
             "/predictions",
             headers=auth_headers,
-            files=image_upload(),
+            files=image_upload(content=image_contents),
         )
 
         assert response.status_code == 202
@@ -173,7 +178,7 @@ def test_create_prediction_job(
         stored_image = Path(prediction.image_path)
 
         assert stored_image.exists()
-        assert stored_image.read_bytes() == b"fake-image-content"
+        assert stored_image.read_bytes() == image_contents
 
 
 def test_create_prediction_requires_authentication(
@@ -326,11 +331,31 @@ def test_worker_returns_false_when_queue_is_empty(db: Session):
     assert was_processed is False
 
 
+def create_image_bytes(
+    image_format: str = "JPEG",
+    size: tuple[int, int] = (16, 16),
+) -> bytes:
+    buffer = BytesIO()
+
+    image = Image.new(
+        mode="RGB",
+        size=size,
+        color=(120, 80, 40),
+    )
+
+    image.save(buffer, format=image_format)
+
+    return buffer.getvalue()
+
+
 def image_upload(
-    content: bytes = b"fake-image-content",
+    content: bytes | None = None,
     filename: str = "test.jpg",
     content_type: str = "image/jpeg",
 ) -> dict:
+    if content is None:
+        content = create_image_bytes("JPEG")
+
     return {
         "image": (
             filename,
@@ -344,13 +369,15 @@ def test_create_prediction_rejects_unsupported_file_type(
     client: TestClient,
     auth_headers: dict[str, str],
 ):
+    gif_contents = create_image_bytes("GIF")
+
     response = client.post(
         "/predictions",
         headers=auth_headers,
         files=image_upload(
-            content=b"not-an-image",
-            filename="document.txt",
-            content_type="text/plain",
+            content=gif_contents,
+            filename="image.gif",
+            content_type="image/gif",
         ),
     )
 
@@ -494,3 +521,84 @@ def test_inactive_user_cannot_create_prediction(
 
     assert response.status_code == 403
     assert response.json()["detail"] == "User account is inactive."
+
+
+def test_create_prediction_rejects_invalid_image_bytes(
+    client: TestClient,
+    auth_headers: dict[str, str],
+):
+    response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(
+            content=b"this-is-not-an-image",
+            filename="fake.jpg",
+            content_type="image/jpeg",
+        ),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == ("The uploaded file is not a valid image.")
+
+
+def test_create_prediction_rejects_mismatched_content_type(
+    client: TestClient,
+    auth_headers: dict[str, str],
+):
+    png_contents = create_image_bytes("PNG")
+
+    response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(
+            content=png_contents,
+            filename="image.jpg",
+            content_type="image/jpeg",
+        ),
+    )
+
+    assert response.status_code == 415
+    assert response.json()["detail"] == (
+        "The declared file type does not match the uploaded image."
+    )
+
+
+def test_create_prediction_accepts_png_image(
+    client: TestClient,
+    db: Session,
+    test_user: User,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    with TemporaryDirectory(
+        prefix="vddai-test-png-",
+        dir=".",
+    ) as temporary_directory:
+        upload_directory = Path(temporary_directory)
+
+        monkeypatch.setattr(
+            image_storage_service,
+            "upload_directory",
+            upload_directory,
+        )
+
+        png_contents = create_image_bytes("PNG")
+
+        response = client.post(
+            "/predictions",
+            headers=auth_headers,
+            files=image_upload(
+                content=png_contents,
+                filename="test.png",
+                content_type="image/png",
+            ),
+        )
+
+        assert response.status_code == 202
+
+        prediction_id = response.json()["prediction_id"]
+        prediction = db.get(Prediction, prediction_id)
+
+        assert prediction is not None
+        assert prediction.image_path.endswith(".png")
+        assert Path(prediction.image_path).exists()

@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+import datetime as dt
 
 from sqlalchemy.orm import Session
 
@@ -41,7 +41,7 @@ def process_next_prediction(db: Session) -> bool:
         prediction.latency_ms = result["latency_ms"]
         prediction.threshold = 0.75
         prediction.status = PredictionStatus.COMPLETED.value
-        prediction.completed_at = datetime.utcnow()
+        prediction.completed_at = dt.datetime.now(dt.UTC)
         prediction.error_message = None
 
         db.commit()
@@ -60,7 +60,7 @@ def process_next_prediction(db: Session) -> bool:
     except Exception as exc:
         prediction.status = PredictionStatus.FAILED.value
         prediction.error_message = str(exc)
-        prediction.completed_at = datetime.utcnow()
+        prediction.completed_at = dt.datetime.now(dt.UTC)
 
         db.commit()
 
