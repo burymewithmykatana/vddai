@@ -7,7 +7,6 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.models.user import User
 from app.schemas.user import Token, UserCreate, UserLogin, UserRead
 
-
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 

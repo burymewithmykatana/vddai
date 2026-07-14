@@ -1,20 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 
 
-class PredictionCreate(BaseModel):
-    user_id: int
-    image_path: str
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "user_id": 1,
-                "image_path": "uploads/test_image_001.jpg",
-            }
-        }
-    )
-
-
 class PredictionQueuedResponse(BaseModel):
     prediction_id: int
     status: str

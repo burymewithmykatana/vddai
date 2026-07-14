@@ -10,6 +10,29 @@ Current implementation:
 - Redis is running but is not currently used by the worker.
 - Celery, RQ, Dramatiq, or another queue system is not configured.
 
+## Secure Image Ingestion
+
+Current implementation:
+
+- Prediction creation requires a valid bearer token.
+- The prediction owner is derived from the JWT subject.
+- Clients cannot provide arbitrary user IDs.
+- Clients upload image bytes through multipart form data.
+- Server-generated UUID filenames prevent collisions and path traversal.
+- JPEG, PNG, and WebP MIME types are accepted.
+- Empty and oversized uploads are rejected.
+- Stored files are removed when database persistence fails.
+- Ordinary users cannot read another user's prediction.
+- Administrators can read predictions belonging to other users.
+
+Remaining limitations:
+
+- MIME type is still supplied by the client.
+- Image bytes are not yet decoded or structurally validated.
+- Files are stored on the local filesystem.
+- There is no object-storage abstraction.
+- Uploaded files are not deleted when prediction records are deleted.
+
 ## Worker Risks
 
 1. Two workers can select the same queued prediction concurrently.
@@ -22,8 +45,12 @@ Current implementation:
 8. The worker processes only one job per invocation.
 9. Random mock inference makes tests nondeterministic.
 10. `datetime.utcnow()` creates naive timestamps.
-11. The API accepts an arbitrary client-provided file path.
-12. The create and read endpoints do not appear protected by JWT.
+11. Image files are now uploaded through an authenticated multipart endpoint,
+    but validation currently trusts the declared MIME type and does not yet
+    decode the file to verify that it contains a valid image.
+12. Prediction creation and retrieval are protected by JWT authentication.
+    Ordinary users can access only their own predictions, while administrators
+    can retrieve predictions belonging to other users.
 
 ## Product Framing
 
@@ -109,3 +136,41 @@ than sell a universal finished inspection model.
 8. Multi-tenancy and customer data isolation are not implemented.
 9. Production ROI has not yet been measured.
 10. The project must avoid overbuilding infrastructure before customer discovery.
+
+
+## Prediction Lifecycle Verification
+
+The asynchronous prediction workflow is covered by 11 passing tests.
+
+Verified behavior:
+
+- prediction jobs are created with HTTP 202
+- jobs begin with queued status
+- jobs are persisted in the database
+- nonexistent users are rejected
+- invalid payloads are rejected
+- prediction jobs can be retrieved
+- missing jobs return HTTP 404
+- workers complete queued jobs
+- inference results are persisted
+- inference failures are persisted
+- empty queues are handled safely
+
+Model inference is replaced with deterministic test doubles during worker
+tests. This separates worker orchestration tests from model-quality tests.
+
+Command:
+
+```bash
+pytest -v
+```
+
+result:
+11 passed
+Then commit that documentation:
+
+```bash
+git add docs/week_02_system_audit.md
+git commit -m "document prediction lifecycle verification"
+git push
+```

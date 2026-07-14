@@ -1,4 +1,7 @@
 import os
+from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 
@@ -14,10 +17,22 @@ from app.api.deps import get_db
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.main import app
+from app.core.config import settings
+from app.core.security import create_access_token
 from app.models.prediction import Prediction, PredictionStatus
 from app.models.user import User
 from app.services.mock_model_service import mock_model_service
+from app.services.image_storage_service import image_storage_service
 from app.workers.prediction_worker import process_next_prediction
+
+
+@pytest.fixture
+def auth_headers(test_user: User) -> dict[str, str]:
+    token = create_access_token(subject=test_user.id)
+
+    return {
+        "Authorization": f"Bearer {token}",
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -117,68 +132,85 @@ def test_health_check(client: TestClient):
 
 def test_create_prediction_job(
     client: TestClient,
-    test_user: User,
-):
-    response = client.post(
-        "/predictions",
-        json={
-            "user_id": test_user.id,
-            "image_path": "uploads/test_image_001.jpg",
-        },
-    )
-
-    assert response.status_code == 202
-
-    data = response.json()
-
-    assert data["prediction_id"] > 0
-    assert data["status"] == PredictionStatus.QUEUED.value
-    assert data["message"] == "Prediction job queued successfully."
-
-
-def test_create_prediction_persists_job(
-    client: TestClient,
     db: Session,
     test_user: User,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    with TemporaryDirectory(
+        prefix="vddai-test-uploads-",
+        dir=".",
+    ) as temporary_directory:
+        upload_directory = Path(temporary_directory)
+
+        monkeypatch.setattr(
+            image_storage_service,
+            "upload_directory",
+            upload_directory,
+        )
+
+        response = client.post(
+            "/predictions",
+            headers=auth_headers,
+            files=image_upload(),
+        )
+
+        assert response.status_code == 202
+
+        data = response.json()
+
+        assert data["prediction_id"] > 0
+        assert data["status"] == PredictionStatus.QUEUED.value
+        assert data["message"] == "Prediction job queued successfully."
+
+        prediction = db.get(Prediction, data["prediction_id"])
+
+        assert prediction is not None
+        assert prediction.user_id == test_user.id
+        assert prediction.image_path.startswith(upload_directory.as_posix())
+        assert prediction.image_path.endswith(".jpg")
+
+        stored_image = Path(prediction.image_path)
+
+        assert stored_image.exists()
+        assert stored_image.read_bytes() == b"fake-image-content"
+
+
+def test_create_prediction_requires_authentication(
+    client: TestClient,
 ):
     response = client.post(
         "/predictions",
-        json={
-            "user_id": test_user.id,
-            "image_path": "uploads/test_image_001.jpg",
-        },
+        files=image_upload(),
     )
 
-    prediction_id = response.json()["prediction_id"]
-
-    db.expire_all()
-    prediction = db.get(Prediction, prediction_id)
-
-    assert prediction is not None
-    assert prediction.user_id == test_user.id
-    assert prediction.image_path == "uploads/test_image_001.jpg"
-    assert prediction.status == PredictionStatus.QUEUED.value
-
-
-def test_create_prediction_for_missing_user(client: TestClient):
-    response = client.post(
-        "/predictions",
-        json={
-            "user_id": 9999,
-            "image_path": "uploads/test_image_001.jpg",
-        },
+    assert response.status_code == 401
+    assert response.json()["detail"] == (
+        "Could not validate authentication credentials."
     )
 
-    assert response.status_code == 404
-    assert response.json()["detail"] == "User not found."
 
-
-def test_create_prediction_validation_error(client: TestClient):
+def test_create_prediction_requires_authentication(
+    client: TestClient,
+):
     response = client.post(
         "/predictions",
-        json={
-            "user_id": 1,
-        },
+        files=image_upload(),
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == (
+        "Could not validate authentication credentials."
+    )
+
+
+def test_create_prediction_requires_image(
+    client: TestClient,
+    auth_headers: dict[str, str],
+):
+    response = client.post(
+        "/predictions",
+        headers=auth_headers,
     )
 
     assert response.status_code == 422
@@ -188,10 +220,14 @@ def test_get_prediction_job(
     client: TestClient,
     db: Session,
     test_user: User,
+    auth_headers: dict[str, str],
 ):
     prediction = create_queued_prediction(db, test_user.id)
 
-    response = client.get(f"/predictions/{prediction.id}")
+    response = client.get(
+        f"/predictions/{prediction.id}",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 200
 
@@ -204,8 +240,14 @@ def test_get_prediction_job(
     assert data["confidence"] is None
 
 
-def test_get_missing_prediction_job(client: TestClient):
-    response = client.get("/predictions/9999")
+def test_get_missing_prediction_job(
+    client: TestClient,
+    auth_headers: dict[str, str],
+):
+    response = client.get(
+        "/predictions/9999",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Prediction job not found."
@@ -282,3 +324,173 @@ def test_worker_returns_false_when_queue_is_empty(db: Session):
     was_processed = process_next_prediction(db)
 
     assert was_processed is False
+
+
+def image_upload(
+    content: bytes = b"fake-image-content",
+    filename: str = "test.jpg",
+    content_type: str = "image/jpeg",
+) -> dict:
+    return {
+        "image": (
+            filename,
+            BytesIO(content),
+            content_type,
+        )
+    }
+
+
+def test_create_prediction_rejects_unsupported_file_type(
+    client: TestClient,
+    auth_headers: dict[str, str],
+):
+    response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(
+            content=b"not-an-image",
+            filename="document.txt",
+            content_type="text/plain",
+        ),
+    )
+
+    assert response.status_code == 415
+    assert response.json()["detail"] == (
+        "Only JPEG, PNG, and WebP images are supported."
+    )
+
+
+def test_get_prediction_hides_other_users_prediction(
+    client: TestClient,
+    db: Session,
+    test_user: User,
+):
+    other_user = User(
+        email="other@example.com",
+        hashed_password="not-a-real-password",
+        full_name="Other User",
+        is_active=True,
+        is_admin=False,
+    )
+
+    db.add(other_user)
+    db.commit()
+    db.refresh(other_user)
+
+    prediction = create_queued_prediction(db, test_user.id)
+    token = create_access_token(subject=other_user.id)
+
+    response = client.get(
+        f"/predictions/{prediction.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Prediction job not found."
+
+
+def test_admin_can_read_another_users_prediction(
+    client: TestClient,
+    db: Session,
+    test_user: User,
+):
+    admin = User(
+        email="admin@example.com",
+        hashed_password="not-a-real-password",
+        full_name="Admin User",
+        is_active=True,
+        is_admin=True,
+    )
+
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+
+    prediction = create_queued_prediction(db, test_user.id)
+    token = create_access_token(subject=admin.id)
+
+    response = client.get(
+        f"/predictions/{prediction.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == prediction.id
+
+
+def test_create_prediction_rejects_empty_image(
+    client: TestClient,
+    auth_headers: dict[str, str],
+):
+    response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(content=b""),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Uploaded image is empty."
+
+
+def test_create_prediction_rejects_oversized_image(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "MAX_IMAGE_SIZE_MB", 1)
+
+    oversized_content = b"x" * (1024 * 1024 + 1)
+
+    response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(content=oversized_content),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == ("Image exceeds the maximum size of 1 MB.")
+
+
+def test_create_prediction_rejects_invalid_token(
+    client: TestClient,
+):
+    response = client.post(
+        "/predictions",
+        headers={
+            "Authorization": "Bearer this-is-not-a-valid-jwt",
+        },
+        files=image_upload(),
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == (
+        "Could not validate authentication credentials."
+    )
+
+
+def test_inactive_user_cannot_create_prediction(
+    client: TestClient,
+    db: Session,
+):
+    inactive_user = User(
+        email="inactive@example.com",
+        hashed_password="not-a-real-password",
+        full_name="Inactive User",
+        is_active=False,
+        is_admin=False,
+    )
+
+    db.add(inactive_user)
+    db.commit()
+    db.refresh(inactive_user)
+
+    token = create_access_token(subject=inactive_user.id)
+
+    response = client.post(
+        "/predictions",
+        headers={"Authorization": f"Bearer {token}"},
+        files=image_upload(),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "User account is inactive."

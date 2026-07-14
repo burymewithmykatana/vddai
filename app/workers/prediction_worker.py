@@ -7,7 +7,6 @@ from app.db.session import SessionLocal
 from app.models.prediction import Prediction, PredictionStatus
 from app.services.mock_model_service import mock_model_service
 
-
 logger = logging.getLogger(__name__)
 
 
