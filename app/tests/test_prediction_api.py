@@ -1,16 +1,9 @@
-import os
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
 from PIL import Image
-
-# These must be set before importing application modules because
-# the SQLAlchemy engine is created during module import.
-os.environ["ENVIRONMENT"] = "test"
-os.environ["DATABASE_URL"] = "sqlite:///./test_vddai.db"
-
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 

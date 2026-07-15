@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     CONFIDENCE_THRESHOLD: float = 0.75
     MAX_IMAGE_SIZE_MB: int = 5
 
+    MODEL_IMAGE_WIDTH: int = 224
+    MODEL_IMAGE_HEIGHT: int = 224
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
