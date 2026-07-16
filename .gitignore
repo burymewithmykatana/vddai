@@ -14,3 +14,5 @@ uploads/
 postgres_data/
 
 artifacts/*.joblib
+
+docs/
