@@ -1,0 +1,19 @@
+{
+  "dataset_name": "MVTec AD",
+  "category": "tile",
+  "source_url": "https://www.mvtec.com/company/research/datasets/mvtec-ad",
+  "acquisition_date": "2026-07-20",
+  "local_root": "data/raw/mvtec_ad/tile",
+  "expected_directories": [
+    "train",
+    "test",
+    "ground_truth"
+  ],
+  "version": "official-release",
+  "archive_sha256": "cf4313b13603bec67abb49ca959488f7eedce2a9f7795ec54446c649ac98cd3d",
+  "notes": "Raw dataset binaries are stored locally and excluded from Git.",
+  "archive_filename": "mvtec_anomaly_detection.tar.xz",
+  "acquisition_method": "official-manual-download",
+  "license": "CC BY-NC-SA 4.0",
+  "commercial_use_allowed": false
+}

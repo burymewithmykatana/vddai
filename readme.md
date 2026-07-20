@@ -295,6 +295,33 @@ Week 3 introduces the first real data pipeline:
 
 *Designing Machine Learning Systems* by Chip Huyen is studied alongside implementation. Each chapter must produce at least one recorded VDDAI design decision. All chapters must be completed before Phase 3: Productize begins.
 
+## MVTec AD Tile Dataset
+
+Week 3 introduces the first real visual anomaly-detection dataset boundary using the `tile` category from MVTec AD.
+
+Raw dataset files are stored locally and excluded from Git. The repository versions only:
+
+- dataset source and acquisition metadata;
+- archive checksum;
+- deterministic acquisition logic;
+- dataset structure and image-integrity validation;
+- image-to-mask associations;
+- focused integrity tests.
+
+Validated local dataset summary:
+
+```text
+Input images: 347
+Training images: 230 normal images
+Test images: 117
+Ground-truth masks: 84
+Image size: 840 × 840
+Image format: PNG
+Corrupt files: 0
+Unsupported files: 0
+Mask association errors: 0
+```
+
 ## Roadmap
 
 The 11-week project moves through:

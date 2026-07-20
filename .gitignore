@@ -16,3 +16,15 @@ postgres_data/
 artifacts/*.joblib
 
 docs/
+
+# Local datasets
+data/raw/
+data/processed/
+data/cache/
+data/downloads/
+
+# Generated dataset manifests and reports
+data/metadata/*.generated.json
+data/metadata/*.generated.csv
+
+.pytest_tmp/
