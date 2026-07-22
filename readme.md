@@ -322,9 +322,90 @@ Unsupported files: 0
 Mask association errors: 0
 ```
 
+## Deterministic Dataset Manifests
+
+VDDAI converts the validated MVTec AD `tile` dataset into explicit, reproducible train, validation, and test manifests.
+
+The split policy preserves the official benchmark boundary:
+
+- `train`: normal images selected from `train/good`;
+- `validation`: a deterministic held-out subset of `train/good`;
+- `test`: the complete official MVTec test set, including normal and defective images.
+
+The training and validation split uses a fixed random seed and configurable validation ratio. The official test set is never mixed into model-development splits.
+
+Each manifest record contains:
+
+- a stable sample ID derived from the relative image path;
+- the relative image path;
+- the assigned split;
+- binary anomaly label;
+- defect class name;
+- anomaly status;
+- associated ground-truth mask path when available;
+- original image dimensions;
+- detected image format and color mode.
+
+Generated manifests are written in both JSON and CSV formats:
+
+```text
+data/metadata/mvtec_ad_tile_manifest.generated.json
+data/metadata/mvtec_ad_tile_manifest.generated.csv
+```
+
+These files are deterministic generated artifacts and are excluded from Git. The repository versions the manifest-generation implementation, dataset acquisition metadata, archive checksum, split seed, validation ratio, and dataset-version fingerprint.
+
+Generate the manifests with:
+
+```powershell
+python -m ml.data.build_manifest
+```
+
+Current split contract:
+
+```text
+Train: 184 normal images
+Validation: 46 normal images
+Test: 117 official test images
+Total: 347 input images
+Random seed: 42
+Validation ratio: 0.20
+```
+
+The dataset version is calculated as a SHA-256 fingerprint over the canonical serialized manifest records. Regenerating the same dataset with the same configuration produces the same split assignments and dataset version.
+
+Automated tests verify:
+
+- stable sample identifiers;
+- deterministic regeneration;
+- non-empty splits;
+- mutual disjointness between train, validation, and test;
+- absence of train/test leakage;
+- correct anomaly labels;
+- correct image-to-mask associations;
+- rejection of invalid split configurations.
+
 ## Verification result
 
-56 passed, 0 warnings
+65 passed, 0 warnings
+
+### Shared offline and online preprocessing
+
+Dataset manifest records are resolved relative to the configured dataset root and passed through the same deterministic preprocessing service used by the inference application.
+
+The preprocessing boundary guarantees:
+
+- EXIF orientation correction;
+- RGB conversion;
+- deterministic bilinear resizing;
+- NumPy `float32` output;
+- normalization to `[0, 1]`;
+- CHW layout;
+- C-contiguous memory;
+- finite-value and shape validation;
+- rejection of absolute paths and dataset-root traversal.
+
+This shared implementation reduces training-serving skew by preventing offline dataset code from silently introducing a different pixel transformation pipeline.
 
 ## Roadmap
 
