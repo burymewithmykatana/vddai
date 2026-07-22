@@ -6,7 +6,7 @@ VDDAI is being developed as a contract-ready pilot platform rather than a detect
 
 ## Current Status
 
-Week 2 is complete. The backend currently provides:
+Week 3 is complete. VDDAI now provides a validated and reproducible visual-anomaly dataset pipeline in addition to the production-oriented backend.
 
 - FastAPI application and health endpoint
 - PostgreSQL persistence with SQLAlchemy
@@ -25,11 +25,18 @@ Week 2 is complete. The backend currently provides:
 - `float32` normalization to `[0, 1]`
 - Automated API and service tests
 - Reproducible local and Docker execution
+- Validated MVTec AD `tile` dataset ingestion
+- Deterministic train, validation, and test manifests
+- Stable dataset-version fingerprinting
+- Shared offline and online preprocessing
+- Ground-truth anomaly-mask processing
+- Framework-independent dataset and batch contracts
+- End-to-end dataset reproducibility reporting
 
 Current verification result:
 
 ```text
-44 passed, 0 warnings
+77 passed, 0 warnings
 ```
 
 ## Project Goal
@@ -385,10 +392,6 @@ Automated tests verify:
 - correct image-to-mask associations;
 - rejection of invalid split configurations.
 
-## Verification result
-
-65 passed, 0 warnings
-
 ### Shared offline and online preprocessing
 
 Dataset manifest records are resolved relative to the configured dataset root and passed through the same deterministic preprocessing service used by the inference application.
@@ -406,6 +409,87 @@ The preprocessing boundary guarantees:
 - rejection of absolute paths and dataset-root traversal.
 
 This shared implementation reduces training-serving skew by preventing offline dataset code from silently introducing a different pixel transformation pipeline.
+
+### Manifest dataset and batch contract
+
+Validated manifest records are exposed through a framework-independent dataset loader.
+
+Each dataset sample contains:
+
+- deterministic sample and source identifiers;
+- preprocessed `float32` image data in CHW layout;
+- binary anomaly label;
+- defect class metadata;
+- a binary segmentation mask in `1 × H × W` format;
+- an explicit flag indicating whether a ground-truth mask exists.
+
+Normal samples receive an all-zero mask so that every sample has a fixed shape. Defective samples load their associated MVTec ground-truth masks.
+
+Image and mask transformations intentionally use different interpolation policies:
+
+- images use bilinear resizing;
+- segmentation masks use nearest-neighbor resizing.
+
+Batches use the following contract:
+
+```text
+images:    (N, 3, H, W), float32, range [0, 1]
+labels:    (N,), int64
+masks:     (N, 1, H, W), uint8, values {0, 1}
+has_masks: (N,), bool
+```
+
+## Week 3 Architecture Decisions
+
+### Dataset lineage
+
+Raw MVTec AD files and generated manifests remain local and excluded from Git. Reproducibility is established through acquisition metadata, archive checksums, validation logic, split configuration, stable sample identifiers, and a canonical dataset-version fingerprint.
+
+### Evaluation boundary
+
+The official MVTec test set remains untouched. Only normal images from `train/good` are deterministically divided into training and validation sets. Test data never influences model development.
+
+### Training-serving consistency
+
+Offline dataset processing and online inference use the same deterministic image-preprocessing implementation. This reduces training-serving skew and makes pixel-level behavior independently testable.
+
+### Segmentation-mask semantics
+
+Ground-truth masks use nearest-neighbor resizing and explicit binary thresholding. Normal samples receive fixed-shape zero masks, allowing normal and anomalous samples to share one batch contract.
+
+### Framework boundary
+
+Dataset semantics are implemented with NumPy and Pillow before adopting PyTorch. The future framework adapter should convert an already validated contract rather than redefine dataset behavior.
+
+## Week 3 Exit Criterion
+
+Week 3 is complete when the MVTec AD `tile` category is:
+
+- structurally validated;
+- checked for corruption and unsupported files;
+- associated with its anomaly masks;
+- deterministically split;
+- versioned;
+- processed through the shared image contract;
+- exposed as fixed-shape samples and batches;
+- verified by an end-to-end reproducibility report;
+- covered by automated tests.
+
+## Week 4 Handoff
+
+Week 4 introduces the first real anomaly-detection baseline.
+
+The initial objective is not multiclass defect classification. The model must learn a representation of normal tile appearance from the training split and produce anomaly scores for validation and official test images.
+
+Week 4 will establish:
+
+- the PyTorch adapter and deterministic data loading;
+- a pretrained feature-extraction baseline;
+- image-level anomaly scores;
+- threshold selection using validation data only;
+- ROC-AUC and precision-recall evaluation;
+- segmentation-aware qualitative error analysis;
+- reproducible model artifacts and metrics.
 
 ## Roadmap
 
