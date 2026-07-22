@@ -322,6 +322,10 @@ Unsupported files: 0
 Mask association errors: 0
 ```
 
+## Verification result
+
+56 passed, 0 warnings
+
 ## Roadmap
 
 The 11-week project moves through:
