@@ -22,6 +22,10 @@ DEFAULT_VALIDATION_RATIO = 0.2
 DEFAULT_RANDOM_SEED = 42
 
 
+class ManifestSerializationError(RuntimeError):
+    """Raised when a serialized dataset manifest cannot be loaded."""
+
+
 @dataclass(frozen=True)
 class ManifestRecord:
     sample_id: str
@@ -280,6 +284,56 @@ def write_json_manifest(
         ),
         encoding="utf-8",
     )
+
+
+def read_json_manifest(input_path: Path) -> DatasetManifest:
+    """Load a JSON manifest into the existing manifest dataclasses."""
+    try:
+        payload = json.loads(
+            input_path.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ManifestSerializationError(
+            f"Dataset manifest could not be read: {input_path}"
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise ManifestSerializationError(
+            "Dataset manifest root must be a JSON object."
+        )
+
+    record_payloads = payload.get("records")
+    if not isinstance(record_payloads, list):
+        raise ManifestSerializationError(
+            "Dataset manifest records must be a JSON array."
+        )
+
+    if not all(
+        isinstance(record_payload, dict)
+        for record_payload in record_payloads
+    ):
+        raise ManifestSerializationError(
+            "Each dataset manifest record must be a JSON object."
+        )
+
+    try:
+        records = [
+            ManifestRecord(**record_payload)
+            for record_payload in record_payloads
+        ]
+
+        return DatasetManifest(
+            dataset_name=payload["dataset_name"],
+            category=payload["category"],
+            dataset_version=payload["dataset_version"],
+            random_seed=payload["random_seed"],
+            validation_ratio=payload["validation_ratio"],
+            records=records,
+        )
+    except (KeyError, TypeError) as exc:
+        raise ManifestSerializationError(
+            "Dataset manifest does not match the expected schema."
+        ) from exc
 
 
 def write_csv_manifest(

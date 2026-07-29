@@ -475,13 +475,19 @@ Week 3 is complete when the MVTec AD `tile` category is:
 - verified by an end-to-end reproducibility report;
 - covered by automated tests.
 
-## Week 4 Handoff
+## Week 4 Complete
 
-Week 4 introduces the first real anomaly-detection baseline.
+The Week 4 image-level anomaly baseline is complete. Its exit criteria verify
+the train-only normal feature bank, validation-only threshold calibration,
+official-test-only final evaluation and qualitative analysis, deterministic
+data loading, shared preprocessing, frozen model adapter, and reproducible
+artifact lineage.
 
-The initial objective is not multiclass defect classification. The model must learn a representation of normal tile appearance from the training split and produce anomaly scores for validation and official test images.
+The objective is anomaly detection, not multiclass defect classification. The
+baseline represents normal tile appearance from the training split and
+produces image-level anomaly scores for validation and official test images.
 
-Week 4 will establish:
+Week 4 delivers:
 
 - the PyTorch adapter and deterministic data loading;
 - a pretrained feature-extraction baseline;
@@ -490,6 +496,167 @@ Week 4 will establish:
 - ROC-AUC and precision-recall evaluation;
 - segmentation-aware qualitative error analysis;
 - reproducible model artifacts and metrics.
+
+PyTorch data loading uses an explicit configuration boundary for batch size,
+worker count, pinned memory, `drop_last`, and random seed. Training loaders are
+seeded and may shuffle; validation and test loaders preserve manifest order.
+The seed is applied to Python `random`, NumPy, PyTorch, the DataLoader
+generator, and worker initialization when workers are enabled. This controls
+sample ordering and seeded execution, but it does not claim bitwise-stable
+results for PyTorch operations that are documented as nondeterministic.
+
+The first representation baseline uses a torchvision pretrained ResNet-18 as a
+frozen feature extractor. VDDAI removes the classifier head and uses the
+global-average-pooled penultimate output, producing one 512-dimensional feature
+vector per image. Dataset tensors remain in the shared storage-level contract:
+`(N, 3, H, W)`, `float32`, range `[0, 1]`. ImageNet mean/std normalization is
+applied inside the ResNet adapter only, because it is model-specific and must
+not change the shared preprocessing contract. The backbone is frozen and kept
+in evaluation mode so Week 4 measures fixed pretrained representations before
+any training or fine-tuning. CPU execution is supported by default; CUDA can be
+selected explicitly when available but is not required.
+
+Generate the normal-training reference feature bank with:
+
+```powershell
+python -m ml.generate_feature_bank
+```
+
+The default output directory is
+`artifacts/feature_banks/mvtec_ad_tile_train_resnet18/`. It contains a
+compressed NumPy archive with the row-aligned feature matrix, sample IDs,
+relative source paths, split names, and dataset versions, plus JSON metadata
+describing the extractor, weights, feature layer, normalization, image size,
+manifest fingerprint, seed, schema version, and UTC creation time. Files are
+written through temporary siblings and atomically replaced; the metadata also
+records the feature archive checksum. Generated feature banks are excluded from
+Git. The command uses only normal records from the training split and does not
+perform anomaly scoring or threshold selection.
+
+Generate exact Euclidean nearest-neighbor anomaly scores with:
+
+```powershell
+python -m ml.score_anomalies --k 1
+```
+
+The scorer returns the mean distance to the `k` nearest normal feature-bank
+vectors, so `k=1` is ordinary nearest-neighbor distance and higher values
+indicate greater anomaly likelihood. The command scores validation and test
+records in manifest order and writes
+`artifacts/anomaly_scores/mvtec_ad_tile_resnet18_knn/scores.json` with each
+sample's metadata and complete dataset, feature-bank, extractor, and scorer
+lineage. Labels are recorded for later evaluation only. This step does not
+select a threshold or calculate final test metrics.
+
+Select a normal-only validation quantile threshold with:
+
+```powershell
+python -m ml.select_threshold --quantile 0.95
+```
+
+This policy computes a linear quantile from normal validation anomaly scores
+only. It is an unsupervised calibration rule, not a threshold optimized for
+classification F1, ROC, precision, or recall. Official test scores and labels
+never enter selection. Prediction semantics are explicit: `score > threshold`
+is anomalous, while `score <= threshold` is normal. The generated threshold
+artifact records validation score statistics, estimated validation
+false-positive rate, quantile policy, source-score checksum, and complete
+dataset, feature-bank, extractor, and scorer lineage.
+
+Produce one complete official-test image-level evaluation run with:
+
+```powershell
+python -m ml.evaluate_baseline --threshold-quantile 0.95
+```
+
+The positive class is anomalous (`label=1`), and continuous scores are used in
+their original direction with higher values meaning more anomalous. The command
+requires a training-only feature-bank lineage, selects the threshold from
+normal validation scores only, and evaluates official-test records once without
+retuning. It stores ROC-AUC, full precision-recall curve data, non-interpolated
+average precision, thresholded confusion and rate metrics, per-defect score
+summaries, distribution summaries, test sample CSV, threshold metadata, and
+evaluation configuration. Each run also contains `run_manifest.json`, which
+records the effective seed, scorer and threshold configuration, protocol roles,
+dataset and model lineage, threshold policy, and checksums for the other run
+artifacts. Accuracy is included but can be misleading under class imbalance.
+
+Each default run receives a unique timestamped directory under
+`artifacts/evaluations/`. A named run fails when it already exists unless
+`--existing-run-policy overwrite` is supplied explicitly. Generated evaluation
+runs are excluded from Git. Unit tests do not generate plots.
+
+Generate segmentation-aware qualitative error analysis for an evaluation run:
+
+```powershell
+python -m ml.generate_error_analysis `
+  --run-dir artifacts/evaluations/<run-name>
+```
+
+The command categorizes official-test samples into TP, TN, FP, and FN review
+queues; ranks high-scoring normals, low-scoring anomalies, and confident
+errors; and describes available ground-truth masks using anomalous pixel count,
+area ratio, and bounding box. It writes deterministic JSON and Markdown
+reports under the evaluation run. Small-anomaly analysis compares false
+negative rates at or below versus above the median annotated anomaly area.
+
+This remains an image-level baseline. Ground-truth masks are used only as
+post-prediction annotations for descriptive error analysis. They are not
+model-generated localization, heatmaps, or pixel-level predictions. The report
+must not be used to retune the Week 4 model or threshold on official-test
+errors. Contact sheets, overlays, connected-component counts, and plots are not
+generated by this command.
+
+## Week 4 Architecture Decisions
+
+### Frozen pretrained representation
+
+The baseline uses a pretrained ResNet-18 because a frozen general-purpose
+visual representation provides a simple, auditable anomaly baseline without
+requiring anomalous training examples. The classifier is removed and the
+512-dimensional global-average-pooled feature is used for exact nearest-neighbor
+comparison against normal training features. Freezing the backbone and keeping
+it in evaluation mode isolates representation quality before any fine-tuning or
+task-specific training is introduced.
+
+### Normal-only threshold calibration
+
+The threshold is the configured quantile of normal validation scores. This
+matches the available validation contract, estimates an acceptable normal
+false-positive boundary, and avoids pretending that a supervised optimum can
+be learned without representative validation anomalies. It is not optimized
+for F1, ROC-AUC, precision, or recall.
+
+### Official test isolation
+
+Training records alone build the reference feature bank, and validation records
+alone select the threshold. Official-test labels are opened only for the frozen
+evaluation and ground-truth masks are used only for post-prediction descriptive
+analysis. Test metrics and error cases must not be used to retune this Week 4
+baseline; doing so would convert the official test set into calibration data.
+
+### Separate model normalization
+
+Canonical preprocessing remains deterministic CHW `float32` in `[0, 1]` for
+both offline datasets and online serving. ImageNet channel normalization lives
+inside the ResNet feature adapter because it is a model-specific input
+requirement. Moving it into shared preprocessing would change the storage-level
+contract and couple every future model to ResNet assumptions.
+
+### Limitations and Week 5 handoff
+
+This baseline emits one global image feature and one image-level score. It does
+not localize anomalous pixels, exact nearest-neighbor scoring scales linearly
+with feature-bank size, normal-only quantile calibration is not a supervised
+operating-point optimum, and the current evidence is limited to the MVTec AD
+tile category. Small `gray_stroke` and `rough` defects remain the main
+qualitative failure group.
+
+Week 5 should consume the frozen run manifest and lineage contracts when
+building the production inference boundary. Any spatial or patch-level method
+motivated by the error analysis should be treated as a new experiment with a
+fresh validation protocol, not as an in-place retuning of the completed Week 4
+result.
 
 ## Roadmap
 

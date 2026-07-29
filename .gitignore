@@ -14,6 +14,19 @@ uploads/
 postgres_data/
 
 artifacts/*.joblib
+artifacts/feature_banks/
+artifacts/anomaly_scores/
+artifacts/thresholds/
+artifacts/evaluations/
+artifacts/models/
+artifacts/weights/
+
+# Downloaded or generated model weights
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
 
 docs/
 
