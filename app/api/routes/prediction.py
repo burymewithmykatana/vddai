@@ -1,6 +1,14 @@
 import logging
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -33,7 +41,6 @@ def create_prediction_job(
         image_width=stored_image.width,
         image_height=stored_image.height,
         status=PredictionStatus.QUEUED.value,
-        model_version="mock-v1",
     )
 
     db.add(prediction)
@@ -69,6 +76,28 @@ def create_prediction_job(
         prediction_id=prediction.id,
         status=prediction.status,
         message="Prediction job queued successfully.",
+    )
+
+
+@router.get("", response_model=list[PredictionRead])
+def list_prediction_jobs(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> list[PredictionRead]:
+    query = db.query(Prediction)
+    if not current_user.is_admin:
+        query = query.filter(Prediction.user_id == current_user.id)
+
+    return (
+        query.order_by(
+            Prediction.created_at.desc(),
+            Prediction.id.desc(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
     )
 
 

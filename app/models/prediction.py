@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -63,16 +63,24 @@ class Prediction(Base):
         nullable=True,
     )
 
-    threshold: Mapped[float] = mapped_column(
+    anomaly_score: Mapped[float | None] = mapped_column(
         Float,
-        nullable=False,
-        default=0.75,
+        nullable=True,
     )
 
-    model_version: Mapped[str] = mapped_column(
+    threshold: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
+    model_version: Mapped[str | None] = mapped_column(
         String(100),
-        nullable=False,
-        default="mock-v0",
+        nullable=True,
+    )
+
+    model_lineage: Mapped[dict[str, object] | None] = mapped_column(
+        JSON,
+        nullable=True,
     )
 
     latency_ms: Mapped[int | None] = mapped_column(

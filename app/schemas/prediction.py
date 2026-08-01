@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -17,9 +19,13 @@ class PredictionRead(BaseModel):
     status: str
     predicted_label: str | None
     confidence: float | None
-    threshold: float
-    model_version: str
+    anomaly_score: float | None
+    threshold: float | None
+    model_version: str | None
+    model_lineage: dict[str, object] | None
     latency_ms: int | None
     error_message: str | None
+    created_at: datetime
+    completed_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)

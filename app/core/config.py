@@ -16,6 +16,12 @@ class Settings(BaseSettings):
 
     MODEL_IMAGE_WIDTH: int = 224
     MODEL_IMAGE_HEIGHT: int = 224
+    MODEL_DEVICE: str = "cpu"
+    WORKER_POLL_INTERVAL_SECONDS: float = 1.0
+    FEATURE_BANK_DIR: str = "artifacts/feature_banks/mvtec_ad_tile_train_resnet18"
+    THRESHOLD_ARTIFACT_PATH: str = (
+        "artifacts/evaluations/baseline_q95_20260729/threshold.json"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

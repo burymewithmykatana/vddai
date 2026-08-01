@@ -15,9 +15,9 @@ from app.db.session import SessionLocal, engine
 from app.main import app
 from app.models.prediction import Prediction, PredictionStatus
 from app.models.user import User
+from app.services.anomaly_inference_service import AnomalyInferenceResult
 from app.services.image_storage_service import image_storage_service
-from app.services.mock_model_service import mock_model_service
-from app.workers.prediction_worker import process_next_prediction
+from app.workers.prediction_worker import process_next_prediction, run_forever
 
 
 @pytest.fixture
@@ -95,7 +95,6 @@ def create_queued_prediction(db: Session, user_id: int) -> Prediction:
         image_width=16,
         image_height=16,
         status=PredictionStatus.QUEUED.value,
-        model_version="mock-v1",
     )
 
     db.add(prediction)
@@ -251,30 +250,87 @@ def test_get_missing_prediction_job(
     assert response.json()["detail"] == "Prediction job not found."
 
 
+def test_prediction_history_is_owner_scoped_and_newest_first(
+    client: TestClient,
+    db: Session,
+    test_user: User,
+    auth_headers: dict[str, str],
+):
+    first = create_queued_prediction(db, test_user.id)
+    second = create_queued_prediction(db, test_user.id)
+    other_user = User(
+        email="history-other@example.com",
+        hashed_password="not-a-real-password",
+        is_active=True,
+        is_admin=False,
+    )
+    db.add(other_user)
+    db.commit()
+    db.refresh(other_user)
+    create_queued_prediction(db, other_user.id)
+
+    response = client.get("/predictions", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [second.id, first.id]
+
+
+def test_completed_prediction_read_includes_score_and_lineage(
+    client: TestClient,
+    db: Session,
+    test_user: User,
+    auth_headers: dict[str, str],
+):
+    prediction = create_queued_prediction(db, test_user.id)
+    prediction.status = PredictionStatus.COMPLETED.value
+    prediction.predicted_label = "normal"
+    prediction.anomaly_score = 4.2
+    prediction.threshold = 4.2
+    prediction.model_version = "package-read-v1"
+    prediction.model_lineage = {
+        "schema_version": "vddai.inference_package.v1",
+        "feature_bank_sha256": "sha256:abc",
+    }
+    db.commit()
+
+    response = client.get(
+        f"/predictions/{prediction.id}",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["predicted_label"] == "normal"
+    assert response.json()["anomaly_score"] == pytest.approx(4.2)
+    assert response.json()["threshold"] == pytest.approx(4.2)
+    assert response.json()["model_version"] == "package-read-v1"
+    assert response.json()["model_lineage"]["feature_bank_sha256"] == ("sha256:abc")
+
+
 def test_worker_completes_queued_prediction(
     db: Session,
     test_user: User,
-    monkeypatch: pytest.MonkeyPatch,
 ):
     prediction = create_queued_prediction(db, test_user.id)
 
-    def deterministic_prediction(image_path: str) -> dict:
-        assert image_path == "uploads/test_image_001.jpg"
+    class DeterministicInferenceService:
+        def predict(self, image_path: str) -> AnomalyInferenceResult:
+            assert image_path == "uploads/test_image_001.jpg"
+            return AnomalyInferenceResult(
+                predicted_label="anomalous",
+                anomaly_score=5.25,
+                threshold=4.2,
+                model_version="package-test-v1",
+                model_lineage={
+                    "schema_version": "vddai.inference_package.v1",
+                    "dataset_category": "tile",
+                },
+                latency_ms=25,
+            )
 
-        return {
-            "predicted_label": "scratch",
-            "confidence": 0.91,
-            "model_version": "mock-test-v1",
-            "latency_ms": 25,
-        }
-
-    monkeypatch.setattr(
-        mock_model_service,
-        "predict",
-        deterministic_prediction,
+    was_processed = process_next_prediction(
+        db,
+        inference_service=DeterministicInferenceService(),
     )
-
-    was_processed = process_next_prediction(db)
 
     db.expire_all()
     completed_prediction = db.get(Prediction, prediction.id)
@@ -282,9 +338,15 @@ def test_worker_completes_queued_prediction(
     assert was_processed is True
     assert completed_prediction is not None
     assert completed_prediction.status == PredictionStatus.COMPLETED.value
-    assert completed_prediction.predicted_label == "scratch"
-    assert completed_prediction.confidence == pytest.approx(0.91)
-    assert completed_prediction.model_version == "mock-test-v1"
+    assert completed_prediction.predicted_label == "anomalous"
+    assert completed_prediction.anomaly_score == pytest.approx(5.25)
+    assert completed_prediction.threshold == pytest.approx(4.2)
+    assert completed_prediction.confidence is None
+    assert completed_prediction.model_version == "package-test-v1"
+    assert completed_prediction.model_lineage == {
+        "schema_version": "vddai.inference_package.v1",
+        "dataset_category": "tile",
+    }
     assert completed_prediction.latency_ms == 25
     assert completed_prediction.completed_at is not None
     assert completed_prediction.error_message is None
@@ -293,20 +355,17 @@ def test_worker_completes_queued_prediction(
 def test_worker_persists_failure(
     db: Session,
     test_user: User,
-    monkeypatch: pytest.MonkeyPatch,
 ):
     prediction = create_queued_prediction(db, test_user.id)
 
-    def failing_prediction(image_path: str) -> dict:
-        raise RuntimeError("Simulated inference failure")
+    class FailingInferenceService:
+        def predict(self, image_path: str) -> AnomalyInferenceResult:
+            raise RuntimeError("Simulated inference failure")
 
-    monkeypatch.setattr(
-        mock_model_service,
-        "predict",
-        failing_prediction,
+    was_processed = process_next_prediction(
+        db,
+        inference_service=FailingInferenceService(),
     )
-
-    was_processed = process_next_prediction(db)
 
     db.expire_all()
     failed_prediction = db.get(Prediction, prediction.id)
@@ -322,6 +381,11 @@ def test_worker_returns_false_when_queue_is_empty(db: Session):
     was_processed = process_next_prediction(db)
 
     assert was_processed is False
+
+
+def test_worker_rejects_non_positive_poll_interval() -> None:
+    with pytest.raises(ValueError, match="poll interval must be positive"):
+        run_forever(0)
 
 
 def create_image_bytes(

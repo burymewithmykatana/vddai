@@ -6,7 +6,9 @@ VDDAI is being developed as a contract-ready pilot platform rather than a detect
 
 ## Current Status
 
-Week 3 is complete. VDDAI now provides a validated and reproducible visual-anomaly dataset pipeline in addition to the production-oriented backend.
+Week 5 is complete. VDDAI now connects authenticated image uploads to the
+frozen Week 4 MVTec AD `tile` anomaly package through a persisted asynchronous
+prediction lifecycle.
 
 - FastAPI application and health endpoint
 - PostgreSQL persistence with SQLAlchemy
@@ -32,12 +34,14 @@ Week 3 is complete. VDDAI now provides a validated and reproducible visual-anoma
 - Ground-truth anomaly-mask processing
 - Framework-independent dataset and batch contracts
 - End-to-end dataset reproducibility reporting
-
-Current verification result:
-
-```text
-77 passed, 0 warnings
-```
+- Frozen pretrained ResNet-18 image-level feature extraction
+- Exact Euclidean nearest-neighbor anomaly scoring
+- Normal-validation-only frozen thresholding
+- Fail-closed artifact checksum and lineage validation
+- Worker-side production inference with no mock fallback
+- Persisted anomaly score, threshold, model package ID, and lineage
+- Owner-scoped authenticated prediction history and readback
+- Alembic migration for the Week 5 result schema
 
 ## Project Goal
 
@@ -108,8 +112,14 @@ REDIS_URL=redis://redis:6379/0
 JWT_SECRET_KEY=change-this-secret
 JWT_EXPIRE_MINUTES=60
 
-CONFIDENCE_THRESHOLD=0.75
 MAX_IMAGE_SIZE_MB=5
+
+MODEL_IMAGE_WIDTH=224
+MODEL_IMAGE_HEIGHT=224
+MODEL_DEVICE=cpu
+WORKER_POLL_INTERVAL_SECONDS=1.0
+FEATURE_BANK_DIR=artifacts/feature_banks/mvtec_ad_tile_train_resnet18
+THRESHOLD_ARTIFACT_PATH=artifacts/evaluations/baseline_q95_20260729/threshold.json
 ```
 
 Replace `JWT_SECRET_KEY` before running the application outside isolated local development. Never commit the real `.env` file.
@@ -167,6 +177,7 @@ Expected results are `accepting connections` and `PONG`.
 ### 5. Start the API
 
 ```powershell
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -657,6 +668,51 @@ building the production inference boundary. Any spatial or patch-level method
 motivated by the error analysis should be treated as a new experiment with a
 fresh validation protocol, not as an in-place retuning of the completed Week 4
 result.
+
+## Week 5 Production Inference
+
+The production flow is now:
+
+```text
+authenticated upload -> queued prediction -> worker claim
+  -> deterministic CHW preprocessing -> frozen ResNet-18 features
+  -> exact k-nearest normal distance -> frozen validation threshold
+  -> persisted result and lineage -> authenticated read/history
+```
+
+Run the continuous worker with:
+
+```powershell
+python -m app.workers.prediction_worker
+```
+
+The worker runs continuously and polls the database-backed queue at the
+configured interval. Docker Compose starts this worker only after the API has
+completed migrations and passed its health check.
+
+`AnomalyInferenceService` treats the configured feature-bank directory and
+threshold JSON as one immutable package. At load time it verifies the feature
+archive checksum, training-only split metadata, row-aligned archive lineage,
+MVTec AD `tile` dataset identity, 224x224 preprocessing dimensions, frozen
+ResNet-18 extractor contract, exact Euclidean `k`-nearest scorer, normal-only
+validation calibration, strict comparison semantics, and cross-artifact
+lineage. Any missing, corrupt, test-derived, or incompatible input fails the
+job; serving never substitutes mock output, a default threshold, regenerated
+artifacts, or downloaded weights.
+
+The worker loads pretrained weights only from the local torch cache. Provision
+the exact `IMAGENET1K_V1` ResNet-18 checkpoint and the configured generated
+artifacts outside Git before starting a production worker. Generated feature
+banks, thresholds, evaluation runs, weights, datasets, and secrets remain
+excluded from version control.
+
+Completed prediction rows persist the image-level `normal`/`anomalous` label,
+raw anomaly score, exact threshold, deterministic package ID, complete package
+lineage, latency, and completion time. `GET /predictions/{id}` returns a single
+authorized result. `GET /predictions?limit=50&offset=0` returns newest-first
+history scoped to the current owner; administrators retain the existing
+cross-owner read privilege. PostgreSQL workers use row locking with
+`SKIP LOCKED` so concurrent workers do not claim the same queued row.
 
 ## Roadmap
 
