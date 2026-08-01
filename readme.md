@@ -671,6 +671,12 @@ result.
 
 ## Week 5 Production Inference
 
+The versioned serving boundary is frozen in
+`docs/decisions/0003-production-inference-contract.md` and executable from
+`app/contracts/inference.py`. Downstream artifact loading and worker inference
+must import that contract rather than redefine score, threshold, label,
+lineage, lifecycle, or failure semantics.
+
 The production flow is now:
 
 ```text

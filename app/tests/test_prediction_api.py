@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,6 +9,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.contracts.inference import (
+    INFERENCE_CONTRACT_SCHEMA_VERSION,
+    MODEL_PACKAGE_SCHEMA_VERSION,
+    PREPROCESSING_SCHEMA_VERSION,
+    AnomalyInferenceResult,
+    InferencePackageLineage,
+    PredictionFailureCode,
+    PredictionLabel,
+)
 from app.core.config import settings
 from app.core.security import create_access_token
 from app.db.base import Base
@@ -15,7 +25,6 @@ from app.db.session import SessionLocal, engine
 from app.main import app
 from app.models.prediction import Prediction, PredictionStatus
 from app.models.user import User
-from app.services.anomaly_inference_service import AnomalyInferenceResult
 from app.services.image_storage_service import image_storage_service
 from app.workers.prediction_worker import process_next_prediction, run_forever
 
@@ -102,6 +111,39 @@ def create_queued_prediction(db: Session, user_id: int) -> Prediction:
     db.refresh(prediction)
 
     return prediction
+
+
+def create_model_lineage(
+    *,
+    package_id: str,
+    threshold: float,
+) -> InferencePackageLineage:
+    return InferencePackageLineage(
+        contract_schema_version=INFERENCE_CONTRACT_SCHEMA_VERSION,
+        schema_version=MODEL_PACKAGE_SCHEMA_VERSION,
+        package_id=package_id,
+        preprocessing_schema_version=PREPROCESSING_SCHEMA_VERSION,
+        dataset_name="MVTec AD",
+        dataset_category="tile",
+        dataset_version="dataset-v1",
+        manifest_fingerprint=f"sha256:{'a' * 64}",
+        feature_bank_schema_version="vddai.feature_bank.v1",
+        feature_bank_code_version="vddai.feature_bank.generator.v1",
+        feature_bank_path="features.npz",
+        feature_bank_sha256=f"sha256:{'b' * 64}",
+        feature_bank_sample_count=2,
+        extractor_name="torchvision.resnet18",
+        extractor_weights="IMAGENET1K_V1",
+        extractor_layer="avgpool",
+        feature_dimension=512,
+        scorer_distance="euclidean",
+        scorer_aggregation="mean_k_nearest",
+        scorer_k=1,
+        threshold_policy="normal_validation_quantile",
+        threshold_quantile=0.95,
+        threshold_value=threshold,
+        threshold_artifact_sha256=f"sha256:{'c' * 64}",
+    )
 
 
 def test_root_endpoint(client: TestClient):
@@ -235,6 +277,8 @@ def test_get_prediction_job(
     assert data["status"] == PredictionStatus.QUEUED.value
     assert data["predicted_label"] is None
     assert data["confidence"] is None
+    assert data["failure_code"] is None
+    assert "error_message" not in data
 
 
 def test_get_missing_prediction_job(
@@ -287,10 +331,12 @@ def test_completed_prediction_read_includes_score_and_lineage(
     prediction.anomaly_score = 4.2
     prediction.threshold = 4.2
     prediction.model_version = "package-read-v1"
-    prediction.model_lineage = {
-        "schema_version": "vddai.inference_package.v1",
-        "feature_bank_sha256": "sha256:abc",
-    }
+    prediction.model_lineage = create_model_lineage(
+        package_id="package-read-v1",
+        threshold=4.2,
+    ).model_dump(mode="json")
+    prediction.latency_ms = 10
+    prediction.completed_at = datetime.now(UTC)
     db.commit()
 
     response = client.get(
@@ -303,7 +349,11 @@ def test_completed_prediction_read_includes_score_and_lineage(
     assert response.json()["anomaly_score"] == pytest.approx(4.2)
     assert response.json()["threshold"] == pytest.approx(4.2)
     assert response.json()["model_version"] == "package-read-v1"
-    assert response.json()["model_lineage"]["feature_bank_sha256"] == ("sha256:abc")
+    assert response.json()["model_lineage"]["feature_bank_sha256"] == (
+        f"sha256:{'b' * 64}"
+    )
+    assert response.json()["confidence"] is None
+    assert "error_message" not in response.json()
 
 
 def test_worker_completes_queued_prediction(
@@ -316,14 +366,14 @@ def test_worker_completes_queued_prediction(
         def predict(self, image_path: str) -> AnomalyInferenceResult:
             assert image_path == "uploads/test_image_001.jpg"
             return AnomalyInferenceResult(
-                predicted_label="anomalous",
+                predicted_label=PredictionLabel.ANOMALOUS,
                 anomaly_score=5.25,
                 threshold=4.2,
                 model_version="package-test-v1",
-                model_lineage={
-                    "schema_version": "vddai.inference_package.v1",
-                    "dataset_category": "tile",
-                },
+                model_lineage=create_model_lineage(
+                    package_id="package-test-v1",
+                    threshold=4.2,
+                ),
                 latency_ms=25,
             )
 
@@ -343,16 +393,14 @@ def test_worker_completes_queued_prediction(
     assert completed_prediction.threshold == pytest.approx(4.2)
     assert completed_prediction.confidence is None
     assert completed_prediction.model_version == "package-test-v1"
-    assert completed_prediction.model_lineage == {
-        "schema_version": "vddai.inference_package.v1",
-        "dataset_category": "tile",
-    }
+    assert completed_prediction.model_lineage["dataset_category"] == "tile"
     assert completed_prediction.latency_ms == 25
     assert completed_prediction.completed_at is not None
     assert completed_prediction.error_message is None
 
 
 def test_worker_persists_failure(
+    client: TestClient,
     db: Session,
     test_user: User,
 ):
@@ -375,6 +423,20 @@ def test_worker_persists_failure(
     assert failed_prediction.status == PredictionStatus.FAILED.value
     assert failed_prediction.error_message == "Simulated inference failure"
     assert failed_prediction.completed_at is not None
+
+    token = create_access_token(subject=test_user.id)
+    response = client.get(
+        f"/predictions/{prediction.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == PredictionStatus.FAILED.value
+    assert response.json()["failure_code"] == (
+        PredictionFailureCode.INFERENCE_FAILED.value
+    )
+    assert "error_message" not in response.json()
+    assert "Simulated inference failure" not in response.text
 
 
 def test_worker_returns_false_when_queue_is_empty(db: Session):

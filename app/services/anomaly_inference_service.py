@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import time
-from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
@@ -17,6 +16,16 @@ import torch
 from torch import Tensor, nn
 from torchvision.models import ResNet18_Weights, resnet18
 
+from app.contracts.inference import (
+    EXPECTED_PREDICTION_SEMANTICS,
+    INFERENCE_CONTRACT_SCHEMA_VERSION,
+    MODEL_PACKAGE_SCHEMA_VERSION,
+    ONLINE_INPUT_CONTRACT,
+    PREPROCESSING_SCHEMA_VERSION,
+    AnomalyInferenceResult,
+    InferencePackageLineage,
+    classify_anomaly_score,
+)
 from app.core.config import settings
 from app.services.image_preprocessing_service import (
     ImagePreprocessingService,
@@ -42,11 +51,6 @@ from ml.threshold_selector import THRESHOLD_POLICY_NAME
 
 logger = logging.getLogger(__name__)
 
-MODEL_PACKAGE_SCHEMA_VERSION = "vddai.inference_package.v1"
-EXPECTED_PREDICTION_SEMANTICS = {
-    "anomalous": "score > threshold",
-    "normal": "score <= threshold",
-}
 EXPECTED_EXTRACTOR = {
     "name": RESNET18_EXTRACTOR_NAME,
     "pretrained_weights": RESNET18_WEIGHTS_IDENTIFIER,
@@ -71,38 +75,7 @@ class FeatureExtractor(Protocol):
         """Return one feature vector per image."""
 
 
-@dataclass(frozen=True)
-class ModelPackageMetadata:
-    schema_version: str
-    package_id: str
-    dataset_name: str
-    dataset_category: str
-    dataset_version: str
-    manifest_fingerprint: str
-    feature_bank_schema_version: str
-    feature_bank_code_version: str
-    feature_bank_sha256: str
-    feature_bank_sample_count: int
-    extractor_name: str
-    extractor_weights: str
-    extractor_layer: str
-    feature_dimension: int
-    scorer_distance: str
-    scorer_aggregation: str
-    scorer_k: int
-    threshold_policy: str
-    threshold_quantile: float
-    threshold_artifact_sha256: str
-
-
-@dataclass(frozen=True)
-class AnomalyInferenceResult:
-    predicted_label: str
-    anomaly_score: float
-    threshold: float
-    model_version: str
-    model_lineage: dict[str, object]
-    latency_ms: int
+ModelPackageMetadata = InferencePackageLineage
 
 
 def _sha256_file(path: Path) -> str:
@@ -220,6 +193,14 @@ class AnomalyInferenceService:
         device: str = "cpu",
     ) -> None:
         self.preprocessing_service = preprocessing_service
+        _, contract_height, contract_width = ONLINE_INPUT_CONTRACT.storage_tensor_shape
+        if (
+            self.preprocessing_service.target_width != contract_width
+            or self.preprocessing_service.target_height != contract_height
+        ):
+            raise ModelPackageError(
+                "Preprocessing dimensions do not match the production contract."
+            )
         self._feature_bank_dir = feature_bank_dir.resolve()
         self._threshold_artifact_path = threshold_artifact_path.resolve()
 
@@ -232,13 +213,16 @@ class AnomalyInferenceService:
             artifact_name="Threshold artifact",
         )
 
-        features_path, expected_features_sha256 = self._validate_feature_bank(
-            feature_bank_metadata
-        )
+        (
+            features_path,
+            expected_features_sha256,
+            feature_bank_path,
+        ) = self._validate_feature_bank(feature_bank_metadata)
         threshold, scorer_k, package_metadata = self._validate_threshold(
             threshold_artifact=threshold_artifact,
             feature_bank_metadata=feature_bank_metadata,
             expected_features_sha256=expected_features_sha256,
+            feature_bank_path=feature_bank_path,
         )
 
         try:
@@ -270,7 +254,7 @@ class AnomalyInferenceService:
     def _validate_feature_bank(
         self,
         metadata: dict[str, object],
-    ) -> tuple[Path, str]:
+    ) -> tuple[Path, str, str]:
         if metadata.get("schema_version") != FEATURE_BANK_SCHEMA_VERSION:
             raise ModelPackageError("Unsupported feature-bank schema version.")
         if metadata.get("split") != "train":
@@ -332,7 +316,7 @@ class AnomalyInferenceService:
             sample_count=sample_count,
             dataset_version=dataset_version,
         )
-        return features_path, expected_checksum
+        return features_path, expected_checksum, str(feature_file["path"])
 
     @staticmethod
     def _validate_feature_archive(
@@ -391,6 +375,7 @@ class AnomalyInferenceService:
         threshold_artifact: dict[str, object],
         feature_bank_metadata: dict[str, object],
         expected_features_sha256: str,
+        feature_bank_path: str,
     ) -> tuple[float, int, ModelPackageMetadata]:
         if threshold_artifact.get("schema_version") != (
             THRESHOLD_ARTIFACT_SCHEMA_VERSION
@@ -488,9 +473,12 @@ class AnomalyInferenceService:
             raise ModelPackageError("Dataset lineage is incompatible.")
 
         package_identity = {
+            "contract_schema_version": INFERENCE_CONTRACT_SCHEMA_VERSION,
             "schema_version": MODEL_PACKAGE_SCHEMA_VERSION,
+            "preprocessing_schema_version": PREPROCESSING_SCHEMA_VERSION,
             "dataset": dataset,
             "feature_bank": threshold_feature_bank,
+            "feature_bank_path": feature_bank_path,
             "feature_extractor": EXPECTED_EXTRACTOR,
             "scorer": scorer,
             "threshold_policy": {
@@ -512,8 +500,10 @@ class AnomalyInferenceService:
             threshold,
             scorer_k,
             ModelPackageMetadata(
+                contract_schema_version=INFERENCE_CONTRACT_SCHEMA_VERSION,
                 schema_version=MODEL_PACKAGE_SCHEMA_VERSION,
                 package_id=package_id,
+                preprocessing_schema_version=PREPROCESSING_SCHEMA_VERSION,
                 dataset_name=str(dataset["name"]),
                 dataset_category=str(dataset["category"]),
                 dataset_version=str(dataset["version"]),
@@ -522,6 +512,7 @@ class AnomalyInferenceService:
                     threshold_feature_bank["schema_version"]
                 ),
                 feature_bank_code_version=str(threshold_feature_bank["code_version"]),
+                feature_bank_path=feature_bank_path,
                 feature_bank_sha256=expected_features_sha256,
                 feature_bank_sample_count=int(threshold_feature_bank["sample_count"]),
                 extractor_name=RESNET18_EXTRACTOR_NAME,
@@ -533,6 +524,7 @@ class AnomalyInferenceService:
                 scorer_k=scorer_k,
                 threshold_policy=THRESHOLD_POLICY_NAME,
                 threshold_quantile=quantile,
+                threshold_value=threshold,
                 threshold_artifact_sha256=str(
                     package_identity["threshold_artifact_sha256"]
                 ),
@@ -550,9 +542,11 @@ class AnomalyInferenceService:
             raise ModelPackageError("Inference must produce exactly one anomaly score.")
 
         score = float(scores[0])
-        predicted_label = "anomalous" if score > self.threshold else "normal"
+        predicted_label = classify_anomaly_score(
+            score=score,
+            threshold=self.threshold,
+        )
         latency_ms = max(0, round((time.perf_counter() - started_at) * 1000))
-        lineage = asdict(self.package_metadata)
 
         logger.info(
             "anomaly_inference_completed package_id=%s label=%s score=%s "
@@ -568,7 +562,7 @@ class AnomalyInferenceService:
             anomaly_score=score,
             threshold=self.threshold,
             model_version=self.package_metadata.package_id,
-            model_lineage=lineage,
+            model_lineage=self.package_metadata,
             latency_ms=latency_ms,
         )
 

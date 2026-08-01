@@ -5,12 +5,12 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session
 
+from app.contracts.inference import (
+    AnomalyInferenceResult,
+)
 from app.db.session import SessionLocal
 from app.models.prediction import Prediction, PredictionStatus
-from app.services.anomaly_inference_service import (
-    AnomalyInferenceResult,
-    get_anomaly_inference_service,
-)
+from app.services.anomaly_inference_service import get_anomaly_inference_service
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def process_next_prediction(
         prediction.anomaly_score = result.anomaly_score
         prediction.confidence = None
         prediction.model_version = result.model_version
-        prediction.model_lineage = result.model_lineage
+        prediction.model_lineage = result.lineage_for_persistence()
         prediction.latency_ms = result.latency_ms
         prediction.threshold = result.threshold
         prediction.status = PredictionStatus.COMPLETED.value

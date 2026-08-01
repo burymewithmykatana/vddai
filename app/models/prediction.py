@@ -4,6 +4,7 @@ from enum import Enum
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.contracts.inference import PredictionFailureCode
 from app.db.base import Base
 
 
@@ -103,6 +104,13 @@ class Prediction(Base):
         DateTime,
         nullable=True,
     )
+
+    @property
+    def failure_code(self) -> str | None:
+        """Expose only a stable public code; keep error_message internal."""
+        if self.status == PredictionStatus.FAILED.value:
+            return PredictionFailureCode.INFERENCE_FAILED.value
+        return None
 
     user = relationship(
         "User",
