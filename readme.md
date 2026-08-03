@@ -119,7 +119,7 @@ MODEL_IMAGE_HEIGHT=224
 MODEL_DEVICE=cpu
 WORKER_POLL_INTERVAL_SECONDS=1.0
 FEATURE_BANK_DIR=artifacts/feature_banks/mvtec_ad_tile_train_resnet18
-THRESHOLD_ARTIFACT_PATH=artifacts/evaluations/baseline_q95_20260729/threshold.json
+MODEL_PACKAGE_MANIFEST_PATH=artifacts/evaluations/baseline_q95_20260729/run_manifest.json
 ```
 
 Replace `JWT_SECRET_KEY` before running the application outside isolated local development. Never commit the real `.env` file.
@@ -696,15 +696,27 @@ The worker runs continuously and polls the database-backed queue at the
 configured interval. Docker Compose starts this worker only after the API has
 completed migrations and passed its health check.
 
-`AnomalyInferenceService` treats the configured feature-bank directory and
-threshold JSON as one immutable package. At load time it verifies the feature
-archive checksum, training-only split metadata, row-aligned archive lineage,
-MVTec AD `tile` dataset identity, 224x224 preprocessing dimensions, frozen
-ResNet-18 extractor contract, exact Euclidean `k`-nearest scorer, normal-only
-validation calibration, strict comparison semantics, and cross-artifact
-lineage. Any missing, corrupt, test-derived, or incompatible input fails the
-job; serving never substitutes mock output, a default threshold, regenerated
-artifacts, or downloaded weights.
+`MODEL_PACKAGE_MANIFEST_PATH` explicitly selects the promoted Week 4 run; the
+loader never scans for the newest directory. `FEATURE_BANK_DIR` explicitly
+selects its normal-training bank, whose lineage must match that run. The
+expected serving members are the run's `run_manifest.json` and referenced
+`threshold.json`, plus the bank's `metadata.json` and referenced
+`features.npz`. See
+`docs/decisions/0004-production-model-package-loader.md` for the exact layout.
+
+`ModelPackageLoader` validates both artifact checksums, package-relative paths,
+supported schemas, training/validation split policy, row-aligned archive
+lineage, MVTec AD `tile` identity, 224x224 preprocessing, frozen ResNet-18
+contract, 512-dimensional features, valid `k`, finite threshold, strict
+comparison semantics, and run/threshold/bank compatibility before returning a
+frozen ready-to-score package. Missing, malformed, corrupt, test-derived, or
+incompatible inputs raise a specific package error and return no partial
+package.
+
+The first claimed job loads the package lazily. A process-local one-entry cache
+then reuses that exact package for every later job in the worker process;
+requests never reload it. Serving never substitutes mock output, a default
+threshold, random weights, regenerated artifacts, or downloaded weights.
 
 The worker loads pretrained weights only from the local torch cache. Provision
 the exact `IMAGENET1K_V1` ResNet-18 checkpoint and the configured generated

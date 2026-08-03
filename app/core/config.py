@@ -19,9 +19,11 @@ class Settings(BaseSettings):
     MODEL_DEVICE: str = "cpu"
     WORKER_POLL_INTERVAL_SECONDS: float = 1.0
     FEATURE_BANK_DIR: str = "artifacts/feature_banks/mvtec_ad_tile_train_resnet18"
-    THRESHOLD_ARTIFACT_PATH: str = (
-        "artifacts/evaluations/baseline_q95_20260729/threshold.json"
+    MODEL_PACKAGE_MANIFEST_PATH: str = (
+        "artifacts/evaluations/baseline_q95_20260729/run_manifest.json"
     )
+    # Accepted only so older local .env files remain readable; serving ignores it.
+    THRESHOLD_ARTIFACT_PATH: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
