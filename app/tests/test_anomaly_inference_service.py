@@ -5,6 +5,7 @@ import torch
 from PIL import Image
 
 from app.contracts.inference import MODEL_PACKAGE_SCHEMA_VERSION
+from app.services import anomaly_inference_service
 from app.services.anomaly_inference_service import AnomalyInferenceService
 from app.services.image_preprocessing_service import ImagePreprocessingService
 from app.services.model_package_loader import (
@@ -87,3 +88,27 @@ def test_runtime_preprocessing_dimensions_cannot_drift_from_package_contract(
                 target_height=128,
             ),
         )
+
+
+def test_latency_uses_monotonic_inference_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = write_package_fixture(tmp_path, threshold=2.0)
+    image_path = tmp_path / "image.png"
+    write_image(image_path)
+    package = ModelPackageLoader(
+        package_manifest_path=fixture.manifest_path,
+        feature_bank_dir=fixture.feature_bank_dir,
+        extractor_factory=lambda device: ConstantFeatureExtractor(value=2.0),
+    ).load()
+    clock = iter([100.0, 100.012])
+    monkeypatch.setattr(
+        anomaly_inference_service.time,
+        "perf_counter",
+        lambda: next(clock),
+    )
+
+    result = AnomalyInferenceService(package=package).predict(image_path)
+
+    assert result.latency_ms == 12

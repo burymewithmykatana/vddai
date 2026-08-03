@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 import pytest
 from PIL import Image
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
@@ -25,7 +26,14 @@ from app.db.session import SessionLocal, engine
 from app.main import app
 from app.models.prediction import Prediction, PredictionStatus
 from app.models.user import User
+from app.services.anomaly_inference_service import AnomalyInferenceService
 from app.services.image_storage_service import image_storage_service
+from app.services.model_package_loader import ModelPackageLoader
+from app.tests.model_package_fixtures import (
+    ConstantFeatureExtractor,
+    write_package_fixture,
+)
+from app.workers import prediction_worker
 from app.workers.prediction_worker import process_next_prediction, run_forever
 
 
@@ -365,6 +373,14 @@ def test_worker_completes_queued_prediction(
     class DeterministicInferenceService:
         def predict(self, image_path: str) -> AnomalyInferenceResult:
             assert image_path == "uploads/test_image_001.jpg"
+            with SessionLocal() as inspection_session:
+                processing = inspection_session.get(Prediction, prediction.id)
+                assert processing is not None
+                assert processing.status == PredictionStatus.PROCESSING.value
+                assert processing.predicted_label is None
+                assert processing.anomaly_score is None
+                assert processing.error_message is None
+                assert processing.completed_at is None
             return AnomalyInferenceResult(
                 predicted_label=PredictionLabel.ANOMALOUS,
                 anomaly_score=5.25,
@@ -396,6 +412,7 @@ def test_worker_completes_queued_prediction(
     assert completed_prediction.model_lineage["dataset_category"] == "tile"
     assert completed_prediction.latency_ms == 25
     assert completed_prediction.completed_at is not None
+    assert completed_prediction.completed_at.tzinfo is None
     assert completed_prediction.error_message is None
 
 
@@ -405,6 +422,18 @@ def test_worker_persists_failure(
     test_user: User,
 ):
     prediction = create_queued_prediction(db, test_user.id)
+    prediction.predicted_label = PredictionLabel.ANOMALOUS.value
+    prediction.anomaly_score = 99.0
+    prediction.threshold = 1.0
+    prediction.model_version = "stale-package-v1"
+    prediction.model_lineage = create_model_lineage(
+        package_id="stale-package-v1",
+        threshold=1.0,
+    ).model_dump(mode="json")
+    prediction.latency_ms = 999
+    prediction.error_message = "stale error"
+    prediction.completed_at = datetime.now(UTC).replace(tzinfo=None)
+    db.commit()
 
     class FailingInferenceService:
         def predict(self, image_path: str) -> AnomalyInferenceResult:
@@ -421,8 +450,17 @@ def test_worker_persists_failure(
     assert was_processed is False
     assert failed_prediction is not None
     assert failed_prediction.status == PredictionStatus.FAILED.value
-    assert failed_prediction.error_message == "Simulated inference failure"
+    assert failed_prediction.error_message == (
+        "RuntimeError: Simulated inference failure"
+    )
     assert failed_prediction.completed_at is not None
+    assert failed_prediction.completed_at.tzinfo is None
+    assert failed_prediction.predicted_label is None
+    assert failed_prediction.anomaly_score is None
+    assert failed_prediction.threshold is None
+    assert failed_prediction.model_version is None
+    assert failed_prediction.model_lineage is None
+    assert failed_prediction.latency_ms is None
 
     token = create_access_token(subject=test_user.id)
     response = client.get(
@@ -437,6 +475,70 @@ def test_worker_persists_failure(
     )
     assert "error_message" not in response.json()
     assert "Simulated inference failure" not in response.text
+
+
+def test_result_commit_failure_rolls_back_and_session_processes_next_job(
+    db: Session,
+    test_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = create_queued_prediction(db, test_user.id)
+    second = create_queued_prediction(db, test_user.id)
+
+    class DeterministicInferenceService:
+        def predict(self, image_path: str) -> AnomalyInferenceResult:
+            lineage = create_model_lineage(
+                package_id="package-transaction-v1",
+                threshold=2.0,
+            )
+            return AnomalyInferenceResult(
+                predicted_label=PredictionLabel.NORMAL,
+                anomaly_score=2.0,
+                threshold=2.0,
+                model_version=lineage.package_id,
+                model_lineage=lineage,
+                latency_ms=3,
+            )
+
+    real_commit = db.commit
+    commit_calls = 0
+
+    def fail_result_commit_once() -> None:
+        nonlocal commit_calls
+        commit_calls += 1
+        if commit_calls == 2:
+            raise SQLAlchemyError("simulated result commit failure")
+        real_commit()
+
+    monkeypatch.setattr(db, "commit", fail_result_commit_once)
+    first_processed = process_next_prediction(
+        db,
+        inference_service=DeterministicInferenceService(),
+    )
+    monkeypatch.setattr(db, "commit", real_commit)
+
+    assert first_processed is False
+    db.expire_all()
+    failed = db.get(Prediction, first.id)
+    assert failed is not None
+    assert failed.status == PredictionStatus.FAILED.value
+    assert failed.predicted_label is None
+    assert failed.anomaly_score is None
+    assert failed.model_lineage is None
+    assert failed.error_message is not None
+    assert failed.error_message.startswith("SQLAlchemyError:")
+
+    second_processed = process_next_prediction(
+        db,
+        inference_service=DeterministicInferenceService(),
+    )
+
+    assert second_processed is True
+    db.expire_all()
+    completed = db.get(Prediction, second.id)
+    assert completed is not None
+    assert completed.status == PredictionStatus.COMPLETED.value
+    assert completed.anomaly_score == pytest.approx(2.0)
 
 
 def test_worker_returns_false_when_queue_is_empty(db: Session):
@@ -482,6 +584,164 @@ def image_upload(
             content_type,
         )
     }
+
+
+def create_test_inference_service(
+    tmp_path: Path,
+    *,
+    threshold: float = 2.0,
+) -> tuple[AnomalyInferenceService, ConstantFeatureExtractor]:
+    fixture = write_package_fixture(tmp_path, threshold=threshold)
+    extractor = ConstantFeatureExtractor(value=2.0)
+    package = ModelPackageLoader(
+        package_manifest_path=fixture.manifest_path,
+        feature_bank_dir=fixture.feature_bank_dir,
+        extractor_factory=lambda device: extractor,
+    ).load()
+    return AnomalyInferenceService(package=package), extractor
+
+
+def test_authenticated_upload_worker_and_readback_use_real_inference_path(
+    client: TestClient,
+    db: Session,
+    test_user: User,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    upload_directory = tmp_path / "uploads"
+    monkeypatch.setattr(
+        image_storage_service,
+        "upload_directory",
+        upload_directory,
+    )
+    inference_service, extractor = create_test_inference_service(
+        tmp_path / "package",
+        threshold=2.0,
+    )
+
+    queued_response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(
+            content=create_image_bytes("PNG"),
+            filename="tile.png",
+            content_type="image/png",
+        ),
+    )
+
+    assert queued_response.status_code == 202
+    prediction_id = queued_response.json()["prediction_id"]
+    db.expire_all()
+    queued = db.get(Prediction, prediction_id)
+    assert queued is not None
+    assert queued.user_id == test_user.id
+    assert queued.status == PredictionStatus.QUEUED.value
+    assert Path(queued.image_path).parent == upload_directory
+
+    was_processed = process_next_prediction(
+        db,
+        inference_service=inference_service,
+    )
+
+    assert was_processed is True
+    db.expire_all()
+    completed = db.get(Prediction, prediction_id)
+    assert completed is not None
+    assert completed.status == PredictionStatus.COMPLETED.value
+    assert completed.predicted_label == PredictionLabel.NORMAL.value
+    assert completed.anomaly_score == pytest.approx(2.0)
+    assert completed.threshold == pytest.approx(2.0)
+    assert completed.model_version == inference_service.package.package_id
+    assert completed.model_lineage["package_id"] == completed.model_version
+    assert completed.latency_ms is not None
+    assert completed.latency_ms >= 0
+    assert completed.completed_at is not None
+    assert completed.completed_at.tzinfo is None
+    assert completed.created_at.tzinfo is None
+    assert completed.error_message is None
+    assert extractor.received_images is not None
+    assert extractor.received_images.shape == (1, 3, 224, 224)
+
+    read_response = client.get(
+        f"/predictions/{prediction_id}",
+        headers=auth_headers,
+    )
+
+    assert read_response.status_code == 200
+    result = read_response.json()
+    assert result["status"] == PredictionStatus.COMPLETED.value
+    assert result["predicted_label"] == PredictionLabel.NORMAL.value
+    assert result["anomaly_score"] == pytest.approx(2.0)
+    assert result["threshold"] == pytest.approx(2.0)
+    assert result["model_version"] == completed.model_version
+    assert result["latency_ms"] >= 0
+    assert result["completed_at"] is not None
+
+
+def test_uploaded_image_preprocessing_failure_becomes_safe_failed_result(
+    client: TestClient,
+    db: Session,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    upload_directory = tmp_path / "uploads"
+    monkeypatch.setattr(
+        image_storage_service,
+        "upload_directory",
+        upload_directory,
+    )
+    inference_service, _ = create_test_inference_service(tmp_path / "package")
+    queued_response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(),
+    )
+    prediction_id = queued_response.json()["prediction_id"]
+    db.expire_all()
+    queued = db.get(Prediction, prediction_id)
+    assert queued is not None
+    Path(queued.image_path).write_bytes(b"corrupt-after-storage")
+
+    was_processed = process_next_prediction(
+        db,
+        inference_service=inference_service,
+    )
+
+    assert was_processed is False
+    db.expire_all()
+    failed = db.get(Prediction, prediction_id)
+    assert failed is not None
+    assert failed.status == PredictionStatus.FAILED.value
+    assert failed.predicted_label is None
+    assert failed.anomaly_score is None
+    assert failed.threshold is None
+    assert failed.model_version is None
+    assert failed.model_lineage is None
+    assert failed.latency_ms is None
+    assert failed.completed_at is not None
+    assert failed.completed_at.tzinfo is None
+    assert failed.error_message is not None
+    assert failed.error_message.startswith("ImagePreprocessingError:")
+
+    read_response = client.get(
+        f"/predictions/{prediction_id}",
+        headers=auth_headers,
+    )
+    assert read_response.status_code == 200
+    public_result = read_response.json()
+    assert public_result["status"] == PredictionStatus.FAILED.value
+    assert public_result["failure_code"] == "inference_failed"
+    assert "error_message" not in public_result
+    assert "corrupt-after-storage" not in read_response.text
+
+
+def test_production_worker_does_not_import_placeholder_model_services() -> None:
+    worker_source = Path(prediction_worker.__file__).read_text(encoding="utf-8")
+
+    assert "mock_model_service" not in worker_source
+    assert "model_service" not in worker_source
 
 
 def test_create_prediction_rejects_unsupported_file_type(

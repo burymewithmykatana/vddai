@@ -3,6 +3,7 @@ import logging
 import time
 from typing import Protocol
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.contracts.inference import (
@@ -20,6 +21,66 @@ class InferenceService(Protocol):
         """Return one frozen-package image-level prediction."""
 
 
+def _utc_now_naive() -> dt.datetime:
+    """Match the repository's timezone-naive UTC database convention."""
+    return dt.datetime.now(dt.UTC).replace(tzinfo=None)
+
+
+def _clear_inference_fields(prediction: Prediction) -> None:
+    prediction.predicted_label = None
+    prediction.confidence = None
+    prediction.anomaly_score = None
+    prediction.threshold = None
+    prediction.model_version = None
+    prediction.model_lineage = None
+    prediction.latency_ms = None
+
+
+def _internal_failure_message(exc: Exception) -> str:
+    detail = str(exc).strip()
+    if not detail:
+        return type(exc).__name__
+    return f"{type(exc).__name__}: {detail}"[:2000]
+
+
+def _mark_prediction_failed(
+    db: Session,
+    *,
+    prediction_id: int,
+    cause: Exception,
+) -> bool:
+    """Recover the transaction, then persist one clean terminal failure."""
+    try:
+        db.rollback()
+        prediction = db.get(Prediction, prediction_id)
+        if prediction is None:
+            logger.error(
+                "worker_failure_row_missing prediction_id=%s",
+                prediction_id,
+            )
+            return False
+
+        _clear_inference_fields(prediction)
+        prediction.status = PredictionStatus.FAILED.value
+        prediction.error_message = _internal_failure_message(cause)
+        prediction.completed_at = _utc_now_naive()
+        db.commit()
+        return True
+    except SQLAlchemyError:
+        logger.exception(
+            "worker_failed_to_persist_failure prediction_id=%s",
+            prediction_id,
+        )
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            logger.exception(
+                "worker_failed_to_recover_session prediction_id=%s",
+                prediction_id,
+            )
+        return False
+
+
 def process_next_prediction(
     db: Session,
     inference_service: InferenceService | None = None,
@@ -27,7 +88,7 @@ def process_next_prediction(
     prediction = (
         db.query(Prediction)
         .filter(Prediction.status == PredictionStatus.QUEUED.value)
-        .order_by(Prediction.created_at.asc())
+        .order_by(Prediction.created_at.asc(), Prediction.id.asc())
         .with_for_update(skip_locked=True)
         .first()
     )
@@ -36,21 +97,32 @@ def process_next_prediction(
         logger.info("worker_no_queued_predictions")
         return False
 
+    prediction_id = prediction.id
+    stored_image_path = prediction.image_path
     logger.info(
-        "worker_started_prediction prediction_id=%s image_path=%s",
-        prediction.id,
-        prediction.image_path,
+        "worker_started_prediction prediction_id=%s",
+        prediction_id,
     )
 
+    _clear_inference_fields(prediction)
     prediction.status = PredictionStatus.PROCESSING.value
-    db.commit()
-    db.refresh(prediction)
+    prediction.error_message = None
+    prediction.completed_at = None
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(
+            "worker_failed_to_claim_prediction prediction_id=%s",
+            prediction_id,
+        )
+        return False
 
     try:
         service = inference_service or get_anomaly_inference_service()
-        result = service.predict(prediction.image_path)
+        result = service.predict(stored_image_path)
 
-        prediction.predicted_label = result.predicted_label
+        prediction.predicted_label = result.predicted_label.value
         prediction.anomaly_score = result.anomaly_score
         prediction.confidence = None
         prediction.model_version = result.model_version
@@ -58,37 +130,34 @@ def process_next_prediction(
         prediction.latency_ms = result.latency_ms
         prediction.threshold = result.threshold
         prediction.status = PredictionStatus.COMPLETED.value
-        prediction.completed_at = dt.datetime.now(dt.UTC)
+        prediction.completed_at = _utc_now_naive()
         prediction.error_message = None
 
         db.commit()
-        db.refresh(prediction)
 
         logger.info(
             "worker_completed_prediction prediction_id=%s label=%s "
             "anomaly_score=%s threshold=%s model_version=%s latency_ms=%s",
-            prediction.id,
-            prediction.predicted_label,
-            prediction.anomaly_score,
-            prediction.threshold,
-            prediction.model_version,
-            prediction.latency_ms,
+            prediction_id,
+            result.predicted_label.value,
+            result.anomaly_score,
+            result.threshold,
+            result.model_version,
+            result.latency_ms,
         )
 
         return True
 
     except Exception as exc:
-        prediction.status = PredictionStatus.FAILED.value
-        prediction.error_message = str(exc)
-        prediction.completed_at = dt.datetime.now(dt.UTC)
-
-        db.commit()
-
         logger.exception(
-            "worker_failed_prediction prediction_id=%s",
-            prediction.id,
+            "worker_prediction_execution_failed prediction_id=%s",
+            prediction_id,
         )
-
+        _mark_prediction_failed(
+            db,
+            prediction_id=prediction_id,
+            cause=exc,
+        )
         return False
 
 

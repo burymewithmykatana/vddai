@@ -718,6 +718,21 @@ then reuses that exact package for every later job in the worker process;
 requests never reload it. Serving never substitutes mock output, a default
 threshold, random weights, regenerated artifacts, or downloaded weights.
 
+For each claimed row, the worker reads only its server-controlled stored-image
+path, applies the shared EXIF/RGB/224x224 bilinear preprocessing contract,
+extracts one frozen ResNet-18 vector, computes the exact configured nearest-
+neighbor distance, and applies the package threshold. The former random mock
+and tabular model services are not part of the application or worker path.
+
+`latency_ms` uses `time.perf_counter()` and measures from immediately before
+stored-image decoding through preprocessing, feature extraction, scoring, and
+the final label decision. Queue wait time, package initialization, and database
+commits are excluded. The worker clears stale result/error fields on transition
+to processing and writes the completed result atomically. On inference or
+result-persistence failure it rolls back the session, records a clean failed
+state when the transaction remains usable, and keeps detailed diagnostics
+internal; the authenticated API exposes only `inference_failed`.
+
 The worker loads pretrained weights only from the local torch cache. Provision
 the exact `IMAGENET1K_V1` ResNet-18 checkpoint and the configured generated
 artifacts outside Git before starting a production worker. Generated feature
