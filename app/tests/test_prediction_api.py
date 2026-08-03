@@ -223,6 +223,45 @@ def test_create_prediction_job(
         assert stored_image.read_bytes() == image_contents
 
 
+def test_create_prediction_commit_failure_removes_orphaned_upload(
+    client: TestClient,
+    db: Session,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    upload_directory = tmp_path / "uploads"
+    monkeypatch.setattr(
+        image_storage_service,
+        "upload_directory",
+        upload_directory,
+    )
+    failing_session = SessionLocal()
+
+    def fail_commit() -> None:
+        raise SQLAlchemyError("simulated queue commit failure")
+
+    monkeypatch.setattr(failing_session, "commit", fail_commit)
+
+    def override_get_db():
+        yield failing_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with pytest.raises(SQLAlchemyError, match="queue commit failure"):
+            client.post(
+                "/predictions",
+                headers=auth_headers,
+                files=image_upload(),
+            )
+    finally:
+        failing_session.close()
+
+    assert upload_directory.exists()
+    assert list(upload_directory.iterdir()) == []
+    assert db.query(Prediction).count() == 0
+
+
 def test_create_prediction_requires_authentication(
     client: TestClient,
 ):
@@ -285,7 +324,10 @@ def test_get_prediction_job(
     assert data["status"] == PredictionStatus.QUEUED.value
     assert data["predicted_label"] is None
     assert data["confidence"] is None
+    assert data["processing_started_at"] is None
+    assert data["completed_at"] is None
     assert data["failure_code"] is None
+    assert "image_path" not in data
     assert "error_message" not in data
 
 
@@ -344,7 +386,8 @@ def test_completed_prediction_read_includes_score_and_lineage(
         threshold=4.2,
     ).model_dump(mode="json")
     prediction.latency_ms = 10
-    prediction.completed_at = datetime.now(UTC)
+    prediction.processing_started_at = prediction.created_at
+    prediction.completed_at = prediction.created_at
     db.commit()
 
     response = client.get(
@@ -357,10 +400,13 @@ def test_completed_prediction_read_includes_score_and_lineage(
     assert response.json()["anomaly_score"] == pytest.approx(4.2)
     assert response.json()["threshold"] == pytest.approx(4.2)
     assert response.json()["model_version"] == "package-read-v1"
+    assert response.json()["processing_started_at"] is not None
+    assert response.json()["completed_at"] is not None
     assert response.json()["model_lineage"]["feature_bank_sha256"] == (
         f"sha256:{'b' * 64}"
     )
     assert response.json()["confidence"] is None
+    assert "image_path" not in response.json()
     assert "error_message" not in response.json()
 
 
@@ -380,6 +426,8 @@ def test_worker_completes_queued_prediction(
                 assert processing.predicted_label is None
                 assert processing.anomaly_score is None
                 assert processing.error_message is None
+                assert processing.processing_started_at is not None
+                assert processing.processing_started_at.tzinfo is None
                 assert processing.completed_at is None
             return AnomalyInferenceResult(
                 predicted_label=PredictionLabel.ANOMALOUS,
@@ -411,6 +459,8 @@ def test_worker_completes_queued_prediction(
     assert completed_prediction.model_version == "package-test-v1"
     assert completed_prediction.model_lineage["dataset_category"] == "tile"
     assert completed_prediction.latency_ms == 25
+    assert completed_prediction.processing_started_at is not None
+    assert completed_prediction.processing_started_at.tzinfo is None
     assert completed_prediction.completed_at is not None
     assert completed_prediction.completed_at.tzinfo is None
     assert completed_prediction.error_message is None
@@ -453,6 +503,8 @@ def test_worker_persists_failure(
     assert failed_prediction.error_message == (
         "RuntimeError: Simulated inference failure"
     )
+    assert failed_prediction.processing_started_at is not None
+    assert failed_prediction.processing_started_at.tzinfo is None
     assert failed_prediction.completed_at is not None
     assert failed_prediction.completed_at.tzinfo is None
     assert failed_prediction.predicted_label is None
@@ -525,6 +577,8 @@ def test_result_commit_failure_rolls_back_and_session_processes_next_job(
     assert failed.predicted_label is None
     assert failed.anomaly_score is None
     assert failed.model_lineage is None
+    assert failed.processing_started_at is not None
+    assert failed.completed_at is not None
     assert failed.error_message is not None
     assert failed.error_message.startswith("SQLAlchemyError:")
 
@@ -539,6 +593,7 @@ def test_result_commit_failure_rolls_back_and_session_processes_next_job(
     assert completed is not None
     assert completed.status == PredictionStatus.COMPLETED.value
     assert completed.anomaly_score == pytest.approx(2.0)
+    assert completed.processing_started_at is not None
 
 
 def test_worker_returns_false_when_queue_is_empty(db: Session):
@@ -637,6 +692,8 @@ def test_authenticated_upload_worker_and_readback_use_real_inference_path(
     assert queued is not None
     assert queued.user_id == test_user.id
     assert queued.status == PredictionStatus.QUEUED.value
+    assert queued.processing_started_at is None
+    assert queued.completed_at is None
     assert Path(queued.image_path).parent == upload_directory
 
     was_processed = process_next_prediction(
@@ -654,8 +711,23 @@ def test_authenticated_upload_worker_and_readback_use_real_inference_path(
     assert completed.threshold == pytest.approx(2.0)
     assert completed.model_version == inference_service.package.package_id
     assert completed.model_lineage["package_id"] == completed.model_version
+    assert completed.model_lineage["schema_version"] == MODEL_PACKAGE_SCHEMA_VERSION
+    assert completed.model_lineage["extractor_name"] == "torchvision.resnet18"
+    assert completed.model_lineage["extractor_weights"] == "IMAGENET1K_V1"
+    assert completed.model_lineage["feature_bank_sha256"].startswith("sha256:")
+    assert completed.model_lineage["dataset_name"] == "MVTec AD"
+    assert completed.model_lineage["dataset_category"] == "tile"
+    assert completed.model_lineage["dataset_version"] == "dataset-v1"
+    assert completed.model_lineage["manifest_fingerprint"].startswith("sha256:")
+    assert completed.model_lineage["preprocessing_schema_version"] == (
+        PREPROCESSING_SCHEMA_VERSION
+    )
+    assert completed.model_lineage["scorer_distance"] == "euclidean"
+    assert completed.model_lineage["scorer_k"] == 1
     assert completed.latency_ms is not None
     assert completed.latency_ms >= 0
+    assert completed.processing_started_at is not None
+    assert completed.processing_started_at.tzinfo is None
     assert completed.completed_at is not None
     assert completed.completed_at.tzinfo is None
     assert completed.created_at.tzinfo is None
@@ -675,8 +747,11 @@ def test_authenticated_upload_worker_and_readback_use_real_inference_path(
     assert result["anomaly_score"] == pytest.approx(2.0)
     assert result["threshold"] == pytest.approx(2.0)
     assert result["model_version"] == completed.model_version
+    assert result["model_lineage"] == completed.model_lineage
     assert result["latency_ms"] >= 0
+    assert result["processing_started_at"] is not None
     assert result["completed_at"] is not None
+    assert "image_path" not in result
 
 
 def test_uploaded_image_preprocessing_failure_becomes_safe_failed_result(
@@ -720,10 +795,13 @@ def test_uploaded_image_preprocessing_failure_becomes_safe_failed_result(
     assert failed.model_version is None
     assert failed.model_lineage is None
     assert failed.latency_ms is None
+    assert failed.processing_started_at is not None
+    assert failed.processing_started_at.tzinfo is None
     assert failed.completed_at is not None
     assert failed.completed_at.tzinfo is None
     assert failed.error_message is not None
     assert failed.error_message.startswith("ImagePreprocessingError:")
+    assert Path(failed.image_path).exists()
 
     read_response = client.get(
         f"/predictions/{prediction_id}",

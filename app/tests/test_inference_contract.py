@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -15,7 +15,7 @@ from app.contracts.inference import (
     PredictionLabel,
     classify_anomaly_score,
 )
-from app.models.prediction import PredictionStatus
+from app.models.prediction import Prediction, PredictionStatus
 from app.schemas.prediction import PredictionRead
 
 
@@ -56,7 +56,6 @@ def base_prediction_payload() -> dict[str, object]:
     return {
         "id": 1,
         "user_id": 2,
-        "image_path": "uploads/server-controlled.png",
         "image_format": "PNG",
         "image_width": 32,
         "image_height": 32,
@@ -69,7 +68,8 @@ def base_prediction_payload() -> dict[str, object]:
         "model_lineage": None,
         "latency_ms": None,
         "failure_code": None,
-        "created_at": datetime.now(UTC),
+        "created_at": datetime.now(),
+        "processing_started_at": None,
         "completed_at": None,
     }
 
@@ -155,14 +155,17 @@ def test_public_schema_keeps_confidence_null_and_hides_internal_error() -> None:
     queued = PredictionRead.model_validate(queued_payload)
 
     assert queued.confidence is None
+    assert "image_path" not in queued.model_dump()
     assert "error_message" not in queued.model_dump()
 
     failed_payload = base_prediction_payload()
+    processing_started_at = datetime.now()
     failed_payload.update(
         {
             "status": PredictionStatus.FAILED,
             "failure_code": PredictionFailureCode.INFERENCE_FAILED,
-            "completed_at": datetime.now(UTC),
+            "processing_started_at": processing_started_at,
+            "completed_at": processing_started_at + timedelta(milliseconds=1),
             "error_message": "C:/private/artifact/path: stack trace",
         }
     )
@@ -182,6 +185,7 @@ def test_public_schema_rejects_lifecycle_and_serialization_drift() -> None:
 
     completed = base_prediction_payload()
     lineage = valid_lineage(threshold=2.0)
+    processing_started_at = datetime.now()
     completed.update(
         {
             "status": PredictionStatus.COMPLETED,
@@ -191,7 +195,8 @@ def test_public_schema_rejects_lifecycle_and_serialization_drift() -> None:
             "model_version": lineage.package_id,
             "model_lineage": lineage,
             "latency_ms": 8,
-            "completed_at": datetime.now(UTC),
+            "processing_started_at": processing_started_at,
+            "completed_at": processing_started_at + timedelta(milliseconds=1),
         }
     )
     serialized = PredictionRead.model_validate(completed).model_dump(mode="json")
@@ -203,3 +208,131 @@ def test_public_schema_rejects_lifecycle_and_serialization_drift() -> None:
     completed["threshold"] = 2.1
     with pytest.raises(ValidationError, match="Threshold does not match"):
         PredictionRead.model_validate(completed)
+
+
+def test_public_schema_enforces_lifecycle_timestamps() -> None:
+    processing = base_prediction_payload()
+    processing.update(
+        {
+            "status": PredictionStatus.PROCESSING,
+            "processing_started_at": processing["created_at"],
+        }
+    )
+    serialized = PredictionRead.model_validate(processing).model_dump(mode="json")
+    assert serialized["processing_started_at"] is not None
+
+    processing["processing_started_at"] = None
+    with pytest.raises(ValidationError, match="processing timestamp"):
+        PredictionRead.model_validate(processing)
+
+    failed = base_prediction_payload()
+    failed.update(
+        {
+            "status": PredictionStatus.FAILED,
+            "failure_code": PredictionFailureCode.INFERENCE_FAILED,
+            "processing_started_at": failed["created_at"] + timedelta(seconds=1),
+            "completed_at": failed["created_at"],
+        }
+    )
+    with pytest.raises(ValidationError, match="cannot precede"):
+        PredictionRead.model_validate(failed)
+
+
+def test_prediction_domain_atomically_completes_full_result() -> None:
+    created_at = datetime(2026, 8, 3, 12, 0, 0)
+    prediction = Prediction(
+        user_id=1,
+        image_path="uploads/internal.png",
+        image_format="PNG",
+        image_width=32,
+        image_height=32,
+        status=PredictionStatus.QUEUED,
+        created_at=created_at,
+    )
+    lineage = valid_lineage(threshold=2.0)
+    result = AnomalyInferenceResult(
+        predicted_label=PredictionLabel.NORMAL,
+        anomaly_score=2.0,
+        threshold=2.0,
+        model_version=lineage.package_id,
+        model_lineage=lineage,
+        latency_ms=8,
+    )
+    processing_started_at = created_at + timedelta(seconds=1)
+    completed_at = processing_started_at + timedelta(milliseconds=8)
+
+    with pytest.raises(ValueError, match="timestamped processing"):
+        prediction.complete(result, at=completed_at)
+
+    prediction.start_processing(at=processing_started_at)
+    prediction.complete(result, at=completed_at)
+
+    assert prediction.status == PredictionStatus.COMPLETED.value
+    assert prediction.predicted_label == PredictionLabel.NORMAL.value
+    assert prediction.anomaly_score == 2.0
+    assert prediction.threshold == 2.0
+    assert prediction.model_version == lineage.package_id
+    assert prediction.model_lineage == lineage.model_dump(mode="json")
+    assert prediction.latency_ms == 8
+    assert prediction.confidence is None
+    assert prediction.processing_started_at == processing_started_at
+    assert prediction.completed_at == completed_at
+
+
+def test_prediction_domain_failure_clears_stale_result() -> None:
+    created_at = datetime(2026, 8, 3, 12, 0, 0)
+    prediction = Prediction(
+        user_id=1,
+        image_path="uploads/internal.png",
+        image_format="PNG",
+        image_width=32,
+        image_height=32,
+        status=PredictionStatus.QUEUED,
+        created_at=created_at,
+        predicted_label=PredictionLabel.ANOMALOUS,
+        anomaly_score=4.0,
+        threshold=2.0,
+        model_version="stale-package",
+        model_lineage={"stale": True},
+        latency_ms=20,
+    )
+    processing_started_at = created_at + timedelta(seconds=1)
+
+    prediction.start_processing(at=processing_started_at)
+    prediction.fail(
+        error_message="RuntimeError: safe internal diagnostic",
+        at=processing_started_at + timedelta(seconds=1),
+    )
+
+    assert prediction.status == PredictionStatus.FAILED.value
+    assert prediction.predicted_label is None
+    assert prediction.anomaly_score is None
+    assert prediction.threshold is None
+    assert prediction.model_version is None
+    assert prediction.model_lineage is None
+    assert prediction.latency_ms is None
+    assert prediction.completed_at is not None
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_prediction_domain_rejects_non_finite_persisted_numbers(value: float) -> None:
+    prediction = Prediction()
+    with pytest.raises(ValueError, match="must be finite"):
+        prediction.anomaly_score = value
+    with pytest.raises(ValueError, match="must be finite"):
+        prediction.threshold = value
+
+
+def test_prediction_domain_rejects_invalid_values_and_aware_timestamps() -> None:
+    prediction = Prediction()
+    with pytest.raises(ValueError, match="status"):
+        prediction.status = "invented"
+    with pytest.raises(ValueError, match="label"):
+        prediction.predicted_label = "defective"
+    with pytest.raises(ValueError, match="non-negative"):
+        prediction.latency_ms = -1
+
+    prediction.status = PredictionStatus.QUEUED
+    prediction.created_at = datetime(2026, 8, 3, 12, 0, 0)
+    with pytest.raises(ValueError, match="timezone-naive UTC"):
+        prediction.start_processing(at=datetime.now(UTC))

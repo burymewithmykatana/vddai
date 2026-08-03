@@ -20,7 +20,6 @@ class PredictionQueuedResponse(BaseModel):
 class PredictionRead(BaseModel):
     id: int
     user_id: int
-    image_path: str
     image_format: str
     image_width: int
     image_height: int
@@ -59,6 +58,7 @@ class PredictionRead(BaseModel):
         description="Stable public failure code without internal exception details."
     )
     created_at: datetime
+    processing_started_at: datetime | None
     completed_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
@@ -79,17 +79,46 @@ class PredictionRead(BaseModel):
             self.latency_ms,
         )
 
-        if self.status in {
-            PredictionStatus.QUEUED,
-            PredictionStatus.PROCESSING,
-        }:
+        for field_name in (
+            "created_at",
+            "processing_started_at",
+            "completed_at",
+        ):
+            timestamp = getattr(self, field_name)
+            if timestamp is not None and timestamp.tzinfo is not None:
+                raise ValueError(f"{field_name} must use timezone-naive UTC.")
+        if (
+            self.processing_started_at is not None
+            and self.processing_started_at < self.created_at
+        ):
+            raise ValueError("processing_started_at cannot precede created_at.")
+        if (
+            self.completed_at is not None
+            and self.processing_started_at is not None
+            and self.completed_at < self.processing_started_at
+        ):
+            raise ValueError("completed_at cannot precede processing_started_at.")
+
+        if self.status == PredictionStatus.QUEUED:
             if any(value is not None for value in result_values):
+                raise ValueError("Queued predictions cannot expose results.")
+            if (
+                self.processing_started_at is not None
+                or self.completed_at is not None
+                or self.failure_code is not None
+            ):
+                raise ValueError("Queued predictions cannot be started or terminal.")
+
+        if self.status == PredictionStatus.PROCESSING:
+            if any(value is not None for value in result_values):
+                raise ValueError("Processing predictions cannot expose results.")
+            if (
+                self.processing_started_at is None
+                or self.completed_at is not None
+                or self.failure_code is not None
+            ):
                 raise ValueError(
-                    "Queued and processing predictions cannot expose results."
-                )
-            if self.completed_at is not None or self.failure_code is not None:
-                raise ValueError(
-                    "Queued and processing predictions cannot be terminal."
+                    "Processing predictions require only a processing timestamp."
                 )
 
         if self.status in {
@@ -100,7 +129,11 @@ class PredictionRead(BaseModel):
                 raise ValueError(
                     "Completed predictions require the full inference result."
                 )
-            if self.completed_at is None or self.failure_code is not None:
+            if (
+                self.processing_started_at is None
+                or self.completed_at is None
+                or self.failure_code is not None
+            ):
                 raise ValueError(
                     "Completed predictions require a successful terminal state."
                 )
@@ -123,7 +156,8 @@ class PredictionRead(BaseModel):
             if any(value is not None for value in result_values):
                 raise ValueError("Failed predictions cannot expose results.")
             if (
-                self.completed_at is None
+                self.processing_started_at is None
+                or self.completed_at is None
                 or self.failure_code != PredictionFailureCode.INFERENCE_FAILED
             ):
                 raise ValueError(

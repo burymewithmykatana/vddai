@@ -41,7 +41,7 @@ prediction lifecycle.
 - Worker-side production inference with no mock fallback
 - Persisted anomaly score, threshold, model package ID, and lineage
 - Owner-scoped authenticated prediction history and readback
-- Alembic migration for the Week 5 result schema
+- Reversible Alembic migrations for the Week 5 result schema and lifecycle
 
 ## Project Goal
 
@@ -292,9 +292,9 @@ Existing database columns remain timezone-naive for compatibility. UTC timestamp
 - MIME type initially comes from client-provided multipart metadata.
 - Image storage is local and is not suitable for multi-instance deployment.
 - File deletion is not yet coupled to prediction-record deletion.
-- Schema evolution needs a formal Alembic migration workflow.
 - The current credentials and secrets are development values.
-- The ML service is not yet connected to a real anomaly-detection model.
+- Database polling is not a durable queue: job leases, retry policy, and crash
+  recovery remain future reliability work.
 - Operational metrics, tracing, and production alerting are not yet implemented.
 
 ## Week 3 Handoff
@@ -740,12 +740,43 @@ banks, thresholds, evaluation runs, weights, datasets, and secrets remain
 excluded from version control.
 
 Completed prediction rows persist the image-level `normal`/`anomalous` label,
-raw anomaly score, exact threshold, deterministic package ID, complete package
-lineage, latency, and completion time. `GET /predictions/{id}` returns a single
-authorized result. `GET /predictions?limit=50&offset=0` returns newest-first
-history scoped to the current owner; administrators retain the existing
-cross-owner read privilege. PostgreSQL workers use row locking with
-`SKIP LOCKED` so concurrent workers do not claim the same queued row.
+finite raw anomaly score, finite exact threshold, deterministic package ID,
+complete versioned package lineage, latency in milliseconds, and created,
+processing-started, and completed timestamps. The explicit columns hold values
+used for display, filtering, and lifecycle checks. The JSON lineage is one
+immutable `vddai.inference_package.v1` audit snapshot containing package and
+contract schemas, ResNet-18 identity and weights, feature-bank checksum,
+dataset/category/version and manifest fingerprint, preprocessing schema,
+Euclidean scorer configuration and `k`, and threshold policy/checksum. It does
+not contain absolute local paths, model weights, or feature-bank content.
+
+Lifecycle nullability is strict: queued rows contain no processing timestamp or
+result; processing rows contain only the start timestamp; completed rows require
+the full result, lineage, and all three timestamps; failed rows contain the
+start/terminal timestamps and safe failure code but no stale result. Timestamps
+are normalized to timezone-naive UTC for compatibility. The legacy
+`confidence` field is deprecated and always null; anomaly distance is exposed
+only as `anomaly_score`.
+
+`GET /predictions/{id}` returns a single authorized result and safe image
+metadata without the internal server filesystem path.
+`GET /predictions?limit=50&offset=0` returns newest-first history scoped to the
+current owner; administrators retain the existing cross-owner read privilege.
+PostgreSQL workers use row locking with `SKIP LOCKED` so concurrent workers do
+not claim the same queued row.
+
+Apply the W5D4 lifecycle migration with `alembic upgrade head`. Revision
+`20260803_02` adds the nullable processing-start timestamp without rewriting
+legacy rows; `alembic downgrade 20260801_01` reverses only that revision. See
+`docs/decisions/0005-inference-result-persistence.md` for the field mapping,
+migration behavior, and legacy-data caveat.
+
+Week 5 exits when an authenticated upload can be queued, processed by the
+frozen Week 4 model package, persisted with the exact score/threshold/label and
+lineage, and read only by an authorized user; corrupt input must end in a safe
+failed state. The executable evidence is the inference-contract, package-loader,
+inference-service, worker/API integration, ownership, orphan-cleanup, rollback,
+and Alembic upgrade/downgrade tests in `app/tests`.
 
 ## Roadmap
 

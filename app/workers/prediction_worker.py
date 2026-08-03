@@ -26,16 +26,6 @@ def _utc_now_naive() -> dt.datetime:
     return dt.datetime.now(dt.UTC).replace(tzinfo=None)
 
 
-def _clear_inference_fields(prediction: Prediction) -> None:
-    prediction.predicted_label = None
-    prediction.confidence = None
-    prediction.anomaly_score = None
-    prediction.threshold = None
-    prediction.model_version = None
-    prediction.model_lineage = None
-    prediction.latency_ms = None
-
-
 def _internal_failure_message(exc: Exception) -> str:
     detail = str(exc).strip()
     if not detail:
@@ -60,13 +50,13 @@ def _mark_prediction_failed(
             )
             return False
 
-        _clear_inference_fields(prediction)
-        prediction.status = PredictionStatus.FAILED.value
-        prediction.error_message = _internal_failure_message(cause)
-        prediction.completed_at = _utc_now_naive()
+        prediction.fail(
+            error_message=_internal_failure_message(cause),
+            at=_utc_now_naive(),
+        )
         db.commit()
         return True
-    except SQLAlchemyError:
+    except (SQLAlchemyError, ValueError):
         logger.exception(
             "worker_failed_to_persist_failure prediction_id=%s",
             prediction_id,
@@ -104,10 +94,7 @@ def process_next_prediction(
         prediction_id,
     )
 
-    _clear_inference_fields(prediction)
-    prediction.status = PredictionStatus.PROCESSING.value
-    prediction.error_message = None
-    prediction.completed_at = None
+    prediction.start_processing(at=_utc_now_naive())
     try:
         db.commit()
     except SQLAlchemyError:
@@ -122,16 +109,7 @@ def process_next_prediction(
         service = inference_service or get_anomaly_inference_service()
         result = service.predict(stored_image_path)
 
-        prediction.predicted_label = result.predicted_label.value
-        prediction.anomaly_score = result.anomaly_score
-        prediction.confidence = None
-        prediction.model_version = result.model_version
-        prediction.model_lineage = result.lineage_for_persistence()
-        prediction.latency_ms = result.latency_ms
-        prediction.threshold = result.threshold
-        prediction.status = PredictionStatus.COMPLETED.value
-        prediction.completed_at = _utc_now_naive()
-        prediction.error_message = None
+        prediction.complete(result, at=_utc_now_naive())
 
         db.commit()
 

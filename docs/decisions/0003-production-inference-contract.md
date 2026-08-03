@@ -72,10 +72,10 @@ score field.
 
 | Status | Result fields | Terminal fields |
 |---|---|---|
-| `queued` | All null | `created_at`; no completion or failure |
-| `processing` | All null | `created_at`; no completion or failure |
-| `completed` | label, anomaly score, threshold, latency, package ID, full public-safe lineage | `created_at`, `completed_at` |
-| `failed` | All result fields null | `created_at`, `completed_at`, public `inference_failed` code |
+| `queued` | All null | `created_at`; no processing, completion, or failure |
+| `processing` | All null | `created_at`, `processing_started_at`; no completion or failure |
+| `completed` | label, anomaly score, threshold, latency, package ID, full public-safe lineage | `created_at`, `processing_started_at`, `completed_at` |
+| `failed` | All result fields null | `created_at`, `processing_started_at`, `completed_at`, public `inference_failed` code |
 
 `needs_review` remains a successful-result lifecycle extension and carries the
 same result requirements as `completed`. Internal exception text stays in the
