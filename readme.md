@@ -1,47 +1,46 @@
 # VDDAI Backend
 
-Production-oriented backend for a domain-agnostic visual inspection and anomaly-detection platform.
+Production-oriented backend for authenticated, asynchronous visual anomaly
+detection. VDDAI is designed as a reusable pilot platform rather than a
+detector tied to one product category.
 
-VDDAI is being developed as a contract-ready pilot platform rather than a detector tied to one product category. Engineering currently uses controlled test images; MVTec AD will provide baseline anomaly-detection data before customer-specific datasets are introduced.
+> **Status:** Week 5 production inference is complete. An authenticated upload
+> can be processed by the frozen MVTec AD `tile` package and persisted with its
+> score, decision threshold, label, latency, and full model lineage. The next
+> milestone is experiment tracking and controlled model promotion.
 
-## Current Status
+## Start Here
 
-Week 5 is complete. VDDAI now connects authenticated image uploads to the
-frozen Week 4 MVTec AD `tile` anomaly package through a persisted asynchronous
-prediction lifecycle.
+| I want to... | Go to |
+|---|---|
+| Run the API on my machine | [Local development](#local-development-api-on-the-host) |
+| Run the complete stack | [Docker development](#docker-development-all-services) |
+| Configure the real model package | [Configuration](#configuration) and [Week 5 production inference](#week-5-production-inference) |
+| Reproduce the data and model baseline | [MVTec AD dataset](#mvtec-ad-tile-dataset) and [Week 4 baseline](#week-4-complete) |
+| Understand image transformations | [Image preprocessing contract](#image-preprocessing-contract) |
+| Review limitations before deployment | [Known risks and deferred work](#known-risks-and-deferred-work) |
 
-- FastAPI application and health endpoint
-- PostgreSQL persistence with SQLAlchemy
-- Redis infrastructure
-- JWT authentication and active-user validation
-- User-owned prediction records
-- Authenticated multipart image ingestion
-- Server-controlled UUID storage paths
-- File-size and media-type validation
-- Image dimension and format metadata
-- Prediction lifecycle states
-- Deterministic image preprocessing
-- EXIF orientation correction
-- RGB conversion
-- Fixed CHW model input
-- `float32` normalization to `[0, 1]`
-- Automated API and service tests
-- Reproducible local and Docker execution
-- Validated MVTec AD `tile` dataset ingestion
-- Deterministic train, validation, and test manifests
-- Stable dataset-version fingerprinting
-- Shared offline and online preprocessing
-- Ground-truth anomaly-mask processing
-- Framework-independent dataset and batch contracts
-- End-to-end dataset reproducibility reporting
-- Frozen pretrained ResNet-18 image-level feature extraction
-- Exact Euclidean nearest-neighbor anomaly scoring
-- Normal-validation-only frozen thresholding
-- Fail-closed artifact checksum and lineage validation
-- Worker-side production inference with no mock fallback
-- Persisted anomaly score, threshold, model package ID, and lineage
-- Owner-scoped authenticated prediction history and readback
-- Reversible Alembic migrations for the Week 5 result schema and lifecycle
+### Before Running Real Inference
+
+Generated datasets, feature banks, evaluation runs, thresholds, and pretrained
+weights are intentionally excluded from Git. The API and test suite can run
+without committing those binaries, but the production worker fails closed
+unless the configured Week 4 package and cached ResNet-18 weights are present.
+See [Configuration](#configuration) for the required artifact paths.
+
+The `.env.example` file uses Docker service names. If the API runs directly on
+the host, change the database and Redis hosts to `localhost` as described in
+[Local development](#local-development-api-on-the-host).
+
+## What Works Today
+
+| Area | Implemented capability |
+|---|---|
+| API and security | FastAPI health routes, JWT authentication, active-user checks, owner-scoped uploads, result readback, and history |
+| Data contract | Validated MVTec AD `tile` ingestion, deterministic splits and fingerprints, mask handling, and shared offline/online preprocessing |
+| Model baseline | Frozen ResNet-18 features, exact Euclidean nearest-neighbor scoring, and a validation-only frozen threshold |
+| Production inference | Fail-closed package loading, checksum and lineage validation, worker-side inference, lifecycle persistence, and safe failures |
+| Verification | 208 automated tests plus a PostgreSQL 16 upgrade/downgrade check for the Week 5 migrations |
 
 ## Project Goal
 
@@ -124,7 +123,7 @@ MODEL_PACKAGE_MANIFEST_PATH=artifacts/evaluations/baseline_q95_20260729/run_mani
 
 Replace `JWT_SECRET_KEY` before running the application outside isolated local development. Never commit the real `.env` file.
 
-## Local Development
+## Local Development: API on the Host
 
 ### Prerequisites
 
@@ -193,7 +192,7 @@ Development endpoints:
 python -m pytest -q
 ```
 
-## Docker Development
+## Docker Development: All Services
 
 Ensure `.env` uses the Docker hostnames from `.env.example`:
 
@@ -770,6 +769,22 @@ Apply the W5D4 lifecycle migration with `alembic upgrade head`. Revision
 legacy rows; `alembic downgrade 20260801_01` reverses only that revision. See
 `docs/decisions/0005-inference-result-persistence.md` for the field mapping,
 migration behavior, and legacy-data caveat.
+
+### PostgreSQL 16 migration verification
+
+The complete Week 5 migration chain was verified on 3 August 2026 against an
+isolated PostgreSQL 16.14 database containing a pre-Alembic `predictions` table
+and a legacy row with `threshold=0.9` and `model_version=legacy-v1`.
+
+`python -m alembic upgrade head` applied revisions `20260801_01` and
+`20260803_02`. The upgraded schema made `threshold` and `model_version`
+nullable without defaults, added nullable `anomaly_score`, `model_lineage`, and
+`processing_started_at` columns, and preserved the legacy values.
+
+`python -m alembic downgrade base` reversed both revisions. The three new
+columns were removed, the non-null `0.75` and `mock-v0` defaults were restored,
+and the legacy values remained unchanged. The disposable verification database
+was removed after the check.
 
 Week 5 exits when an authenticated upload can be queued, processed by the
 frozen Week 4 model package, persisted with the exact score/threshold/label and

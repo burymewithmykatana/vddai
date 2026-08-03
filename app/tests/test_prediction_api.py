@@ -276,20 +276,6 @@ def test_create_prediction_requires_authentication(
     )
 
 
-def test_create_prediction_requires_authentication(
-    client: TestClient,
-):
-    response = client.post(
-        "/predictions",
-        files=image_upload(),
-    )
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == (
-        "Could not validate authentication credentials."
-    )
-
-
 def test_create_prediction_requires_image(
     client: TestClient,
     auth_headers: dict[str, str],

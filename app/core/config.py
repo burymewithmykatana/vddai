@@ -11,7 +11,6 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = "change-this-secret"
     JWT_EXPIRE_MINUTES: int = 60
 
-    CONFIDENCE_THRESHOLD: float = 0.75
     MAX_IMAGE_SIZE_MB: int = 5
 
     MODEL_IMAGE_WIDTH: int = 224

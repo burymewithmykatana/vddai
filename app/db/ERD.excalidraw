@@ -111,8 +111,8 @@
     {
       "id": "6kAvv8OZulCHw3x8OSQ2k",
       "type": "text",
-      "x": 211.8819580078125,
-      "y": 312.33329010009766,
+      "x": 209.5382080078125,
+      "y": 312.9843215942383,
       "width": 275.615234375,
       "height": 243.75,
       "angle": 0,
@@ -128,8 +128,8 @@
       "index": "a3",
       "roundness": null,
       "seed": 420950225,
-      "version": 129,
-      "versionNonce": 1010055263,
+      "version": 130,
+      "versionNonce": 1990303813,
       "isDeleted": false,
       "boundElements": [
         {
@@ -137,7 +137,7 @@
           "type": "arrow"
         }
       ],
-      "updated": 1783284493558,
+      "updated": 1785774252043,
       "link": null,
       "locked": false,
       "text": "PK  id : INTEGER\n\nemail : VARCHAR(255) UNIQUE\n\nhashed_password : VARCHAR(255)\n\nfull_name : VARCHAR(255) NULL\n\nis_active : BOOLEAN\n\nis_admin : BOOLEAN\n\ncreated_at : DATETIME",
@@ -153,8 +153,8 @@
     {
       "id": "9yuh8aITynzQI4MUghMog",
       "type": "rectangle",
-      "x": 976.7708740234375,
-      "y": 245.22220611572266,
+      "x": 979.6961873372395,
+      "y": 200.58243052164715,
       "width": 360,
       "height": 44,
       "angle": 0,
@@ -172,8 +172,8 @@
         "type": 3
       },
       "seed": 830140081,
-      "version": 59,
-      "versionNonce": 585880703,
+      "version": 127,
+      "versionNonce": 1356631883,
       "isDeleted": false,
       "boundElements": [
         {
@@ -181,17 +181,17 @@
           "id": "iPflb3OD9Ze4buNtcF8Tj"
         }
       ],
-      "updated": 1783284493558,
+      "updated": 1785774275211,
       "link": null,
       "locked": false
     },
     {
       "id": "OwpR-VeVoeIII3xraPC0B",
       "type": "rectangle",
-      "x": 978.0555419921875,
-      "y": 294.22220611572266,
-      "width": 360,
-      "height": 493.33337402343744,
+      "x": 968.593770345052,
+      "y": 255.57202402750653,
+      "width": 470.54687500000006,
+      "height": 759.4574737548828,
       "angle": 0,
       "strokeColor": "#757575",
       "backgroundColor": "transparent",
@@ -205,8 +205,8 @@
       "index": "a5",
       "roundness": null,
       "seed": 1718349969,
-      "version": 138,
-      "versionNonce": 754057407,
+      "version": 223,
+      "versionNonce": 839165547,
       "isDeleted": false,
       "boundElements": [
         {
@@ -214,17 +214,17 @@
           "type": "arrow"
         }
       ],
-      "updated": 1783284493558,
+      "updated": 1785774279071,
       "link": null,
       "locked": false
     },
     {
       "id": "bJY09sFYqIdrd61BorrUF",
       "type": "text",
-      "x": 988.8958740234375,
-      "y": 320.11112213134766,
+      "x": 984.9896240234375,
+      "y": 272.58510589599604,
       "width": 340.27587890625006,
-      "height": 437.5,
+      "height": 682.5,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -238,8 +238,8 @@
       "index": "a6",
       "roundness": null,
       "seed": 1034008177,
-      "version": 139,
-      "versionNonce": 1342840063,
+      "version": 167,
+      "versionNonce": 1938897515,
       "isDeleted": false,
       "boundElements": [
         {
@@ -247,16 +247,16 @@
           "type": "arrow"
         }
       ],
-      "updated": 1783284493558,
+      "updated": 1785774285073,
       "link": null,
       "locked": false,
-      "text": "PK  id : INTEGER\n\nFK  user_id : INTEGER  →  users.id (CASCADE)\n\nimage_path : VARCHAR(500)\n\nstatus : VARCHAR(50)  [enum: queued,\nprocessing,\ncompleted, failed, needs_review]\n\npredicted_label : VARCHAR(100) NULL\n\nconfidence : FLOAT NULL\n\nthreshold : FLOAT (default 0.75)\n\nmodel_version : VARCHAR(100)\n\nlatency_ms : INTEGER NULL\n\nerror_message : TEXT NULL\n\ncreated_at : DATETIME\n\ncompleted_at : DATETIME NULL",
+      "text": "PK  id : INTEGER\n\nFK  user_id : INTEGER  →  users.id (CASCADE)\n\nimage_path : VARCHAR(500)\n\nimage_format : VARCHAR(20)\n\nimage_width : INTEGER\n\nimage_height : INTEGER\n\nstatus : VARCHAR(50)  [enum: queued,\nprocessing,\ncompleted, failed, needs_review]\n\npredicted_label : VARCHAR(100) NULL\n\nconfidence : FLOAT NULL [legacy only]\n\nanomaly_score : FLOAT NULL\n\nthreshold : FLOAT NULL [promoted package]\n\nmodel_version : VARCHAR(100) NULL [package\nid]\n\nmodel_lineage : JSON NULL [package +\nartifact lineage]\n\nlatency_ms : INTEGER NULL\n\nerror_message : TEXT NULL\n\ncreated_at : DATETIME\n\nprocessing_started_at : DATETIME NULL\n\ncompleted_at : DATETIME NULL",
       "fontSize": 14,
       "fontFamily": 8,
       "textAlign": "left",
       "verticalAlign": "top",
       "containerId": null,
-      "originalText": "PK  id : INTEGER\n\nFK  user_id : INTEGER  →  users.id (CASCADE)\n\nimage_path : VARCHAR(500)\n\nstatus : VARCHAR(50)  [enum: queued, processing,\ncompleted, failed, needs_review]\n\npredicted_label : VARCHAR(100) NULL\n\nconfidence : FLOAT NULL\n\nthreshold : FLOAT (default 0.75)\n\nmodel_version : VARCHAR(100)\n\nlatency_ms : INTEGER NULL\n\nerror_message : TEXT NULL\n\ncreated_at : DATETIME\n\ncompleted_at : DATETIME NULL",
+      "originalText": "PK  id : INTEGER\n\nFK  user_id : INTEGER  →  users.id (CASCADE)\n\nimage_path : VARCHAR(500)\n\nimage_format : VARCHAR(20)\n\nimage_width : INTEGER\n\nimage_height : INTEGER\n\nstatus : VARCHAR(50)  [enum: queued,\nprocessing,\ncompleted, failed, needs_review]\n\npredicted_label : VARCHAR(100) NULL\n\nconfidence : FLOAT NULL [legacy only]\n\nanomaly_score : FLOAT NULL\n\nthreshold : FLOAT NULL [promoted package]\n\nmodel_version : VARCHAR(100) NULL [package id]\n\nmodel_lineage : JSON NULL [package + artifact lineage]\n\nlatency_ms : INTEGER NULL\n\nerror_message : TEXT NULL\n\ncreated_at : DATETIME\n\nprocessing_started_at : DATETIME NULL\n\ncompleted_at : DATETIME NULL",
       "autoResize": false,
       "lineHeight": 1.25
     },
@@ -264,9 +264,9 @@
       "id": "rVqGD4NAiZt_esb8Mxs9v",
       "type": "arrow",
       "x": 522.0625,
-      "y": 402.2542224240729,
-      "width": 429.9375,
-      "height": 1.9600872773753508,
+      "y": 405.31050670138757,
+      "width": 420.4757283528645,
+      "height": 6.616876874247737,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -280,8 +280,8 @@
       "index": "a7",
       "roundness": null,
       "seed": 434356305,
-      "version": 308,
-      "versionNonce": 878862353,
+      "version": 395,
+      "versionNonce": 588947723,
       "isDeleted": false,
       "boundElements": [
         {
@@ -289,7 +289,7 @@
           "id": "h-SdJS3gGbA9hGVdhH346"
         }
       ],
-      "updated": 1783284493688,
+      "updated": 1785774279072,
       "link": null,
       "locked": false,
       "points": [
@@ -298,8 +298,8 @@
           0
         ],
         [
-          429.9375,
-          -1.9600872773753508
+          420.4757283528645,
+          6.616876874247737
         ]
       ],
       "lastCommittedPoint": null,
@@ -320,9 +320,9 @@
     {
       "id": "NIeythABJ2RwccKykSKEP",
       "type": "text",
-      "x": 301.5196533203125,
+      "x": 288.48199462890625,
       "y": 267.08329010009766,
-      "width": 92.724609375,
+      "width": 118.7999267578125,
       "height": 22.5,
       "angle": 0,
       "strokeColor": "#4a9eed",
@@ -337,11 +337,11 @@
       "index": "a8",
       "roundness": null,
       "seed": 420056625,
-      "version": 111,
-      "versionNonce": 872762367,
+      "version": 112,
+      "versionNonce": 250874405,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1783284493558,
+      "updated": 1785774249747,
       "link": null,
       "locked": false,
       "text": "User (users)",
@@ -357,9 +357,9 @@
     {
       "id": "iPflb3OD9Ze4buNtcF8Tj",
       "type": "text",
-      "x": 1064.8240966796875,
-      "y": 255.97220611572266,
-      "width": 183.8935546875,
+      "x": 1040.896260579427,
+      "y": 211.33243052164715,
+      "width": 237.599853515625,
       "height": 22.5,
       "angle": 0,
       "strokeColor": "#f59e0b",
@@ -374,11 +374,11 @@
       "index": "a9",
       "roundness": null,
       "seed": 838508561,
-      "version": 65,
-      "versionNonce": 1687874719,
+      "version": 134,
+      "versionNonce": 1958899179,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1783284493558,
+      "updated": 1785774275211,
       "link": null,
       "locked": false,
       "text": "Prediction (predictions)",
@@ -396,8 +396,8 @@
       "type": "text",
       "x": 520.6119384765625,
       "y": 261.57364777952586,
-      "width": 228.515625,
-      "height": 18.75,
+      "width": 156.75,
+      "height": 37.5,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -411,14 +411,14 @@
       "index": "aA",
       "roundness": null,
       "seed": 313423345,
-      "version": 14,
-      "versionNonce": 546942463,
+      "version": 17,
+      "versionNonce": 1771146155,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1783284491704,
+      "updated": 1785774276445,
       "link": null,
       "locked": false,
-      "text": "1 : N  (user.id → prediction.user_id)",
+      "text": "1 : N  (user.id →\nprediction.user_id)",
       "fontSize": 15,
       "fontFamily": 8,
       "textAlign": "center",
