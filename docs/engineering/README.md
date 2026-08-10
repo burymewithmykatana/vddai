@@ -1,0 +1,10 @@
+# Engineering Documentation
+
+This section explains current cross-component engineering behavior that is too
+broad for one module but does not itself create a new architecture decision.
+
+- [`data-lineage.md`](data-lineage.md): dataset, preprocessing, feature,
+  artifact, evaluation, and production-serving lineage.
+
+Keep implementation-specific commands in the root README or scripts. Record a
+new ADR when an engineering change alters a durable compatibility boundary.

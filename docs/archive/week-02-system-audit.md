@@ -1,3 +1,12 @@
+# Week 2 System Audit
+
+- Status: Historical
+- Snapshot: Week 2
+
+> This document records an earlier implementation state. Its mock-inference,
+> worker, product, metrics, and command statements are not current requirements.
+> Use the current documentation index, accepted ADRs, code, and tests instead.
+
 ## Worker Architecture
 
 Current implementation:
@@ -165,12 +174,4 @@ Command:
 pytest -v
 ```
 
-result:
-11 passed
-Then commit that documentation:
-
-```bash
-git add docs/week_02_system_audit.md
-git commit -m "document prediction lifecycle verification"
-git push
-```
+Historical result: `11 passed`.

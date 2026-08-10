@@ -1,0 +1,54 @@
+schema_version: 1
+documents:
+  - path: docs/product/product-definition.md
+    area: product
+    kind: product-definition
+    status: current
+  - path: docs/product/problem-statement.md
+    area: product
+    kind: problem-statement
+    status: draft
+  - path: docs/product/customer-discovery.md
+    area: product
+    kind: customer-discovery
+    status: draft
+  - path: docs/product/target-markets.md
+    area: product
+    kind: market-analysis
+    status: current
+  - path: docs/product/pilot-offer.md
+    area: product
+    kind: offer
+    status: current
+  - path: docs/product/success-metrics.md
+    area: product
+    kind: success-metrics
+    status: draft
+  - path: docs/architecture/system-requirements.md
+    area: architecture
+    kind: system-requirements
+    status: current
+  - path: docs/engineering/data-lineage.md
+    area: engineering
+    kind: data-lineage
+    status: current
+  - path: docs/decisions/0001-product-and-data-strategy.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted
+  - path: docs/decisions/0002-anomaly-baseline-and-pytorch-data-contract.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted
+  - path: docs/decisions/0003-production-inference-contract.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted
+  - path: docs/decisions/0004-production-model-package-loader.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted
+  - path: docs/decisions/0005-inference-result-persistence.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted

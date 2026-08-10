@@ -18,6 +18,7 @@ detector tied to one product category.
 | Configure the real model package | [Configuration](#configuration) and [Week 5 production inference](#week-5-production-inference) |
 | Reproduce the data and model baseline | [MVTec AD dataset](#mvtec-ad-tile-dataset) and [Week 4 baseline](#week-4-complete) |
 | Understand image transformations | [Image preprocessing contract](#image-preprocessing-contract) |
+| Navigate product, architecture, and engineering documentation | [Documentation index](docs/README.md) |
 | Review limitations before deployment | [Known risks and deferred work](#known-risks-and-deferred-work) |
 
 ### Before Running Real Inference
@@ -83,6 +84,8 @@ app/
 └── main.py              # FastAPI application entry point
 
 ml/                      # Training and ML pipeline code
+docs/                    # Indexed product, architecture, engineering, ADR, review, and archive docs
+scripts/                 # Bootstrap, verification, documentation, and operational utilities
 artifacts/               # Generated model artifacts and metrics
 uploads/                 # Local development image storage
 Dockerfile               # API container definition

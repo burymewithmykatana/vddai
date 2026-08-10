@@ -45,6 +45,9 @@ jobs:
       - name: Validate installed dependencies
         run: python -m pip check
 
+      - name: Validate documentation architecture
+        run: python scripts/validate_docs.py
+
       - name: Validate Alembic revision graph
         run: python -m alembic heads
 
