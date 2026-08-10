@@ -1,0 +1,4 @@
+interface:
+  display_name: "VDDAI ML Change"
+  short_description: "Implement VDDAI ML changes without contract drift"
+  default_prompt: "Use $vddai-ml-change to implement this VDDAI ML task with lineage, leakage, compatibility, and verification checks."
