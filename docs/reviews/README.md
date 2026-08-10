@@ -1,0 +1,19 @@
+# Review Records
+
+This directory contains immutable review and remediation evidence. Reports show
+what was inspected at a point in time; they are not current architecture or
+product requirements.
+
+The current series documents the A1-A10 agent-readiness migration:
+
+1. [`2026-08-10-agent-readiness-a1-a10.md`](2026-08-10-agent-readiness-a1-a10.md)
+2. [`2026-08-10-agent-readiness-a1-a10-remediation.md`](2026-08-10-agent-readiness-a1-a10-remediation.md)
+3. [`2026-08-10-agent-readiness-a1-a10-r2.md`](2026-08-10-agent-readiness-a1-a10-r2.md)
+4. [`2026-08-10-agent-readiness-a1-a10-r2-remediation.md`](2026-08-10-agent-readiness-a1-a10-r2-remediation.md)
+5. [`2026-08-10-agent-readiness-a1-a10-r3.md`](2026-08-10-agent-readiness-a1-a10-r3.md)
+6. [`2026-08-10-agent-readiness-a1-a10-r3-remediation.md`](2026-08-10-agent-readiness-a1-a10-r3-remediation.md)
+7. [`2026-08-10-agent-readiness-a1-a10-r4.md`](2026-08-10-agent-readiness-a1-a10-r4.md)
+
+For a new task, create a new dated report series with the task slug. Never edit
+an earlier report to make a later result appear cleaner; add remediation and
+re-review evidence.

@@ -1,5 +1,8 @@
 # Candidate Target Markets
 
+- Status: Current hypotheses; customer validation required
+- Last reviewed: 2026-08-10
+
 ## Selection Criteria
 
 A suitable first customer should have:

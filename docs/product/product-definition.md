@@ -1,5 +1,8 @@
 # VDDAI Product Definition
 
+- Status: Current
+- Last reviewed: 2026-08-10
+
 ## Product
 
 VDDAI is a configurable visual-inspection platform for small and medium

@@ -1,5 +1,9 @@
 # Project Data Lineage
 
+- Status: Current
+- Last reviewed: 2026-08-10
+- Scope: MVTec AD `tile` offline lineage and package-backed online inference
+
 This document is the project data lineage explanation. It describes where the
 MVTec AD tile data comes from, how each processing stage transforms it, which
 identifiers are preserved, and how model-facing tensors can be traced back to

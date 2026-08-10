@@ -1,5 +1,8 @@
 # Visual Inspection Feasibility Pilot
 
+- Status: Current offer definition
+- Last reviewed: 2026-08-10
+
 ## Purpose
 
 Determine whether a customer's selected visual inspection task is suitable

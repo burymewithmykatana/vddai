@@ -161,6 +161,10 @@ try {
         "check"
     )
 
+    Invoke-NativeCommand -FilePath $PythonCommand -Arguments @(
+        "scripts/validate_docs.py"
+    )
+
     if ($IncludeFormatting) {
         Invoke-NativeCommand -FilePath $PythonCommand -Arguments @(
             "-m",

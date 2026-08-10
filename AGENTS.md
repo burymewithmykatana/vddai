@@ -77,7 +77,14 @@ explicit architecture task.
 - `ml/`: offline data, feature, scoring, threshold, evaluation, and artifact
   generation pipelines.
 - `alembic/`: persistent schema migrations.
+- `docs/README.md`: documentation index, lifecycle rules, and agent routing.
+- `docs/catalog.yaml`: machine-readable inventory of current maintained docs.
+- `docs/product/`: product boundary, discovery, offer, markets, and measures.
+- `docs/architecture/`: current system requirements and architecture boundaries.
+- `docs/engineering/`: current cross-component engineering contracts.
 - `docs/decisions/`: accepted Architecture Decision Records (ADRs).
+- `docs/reviews/`: immutable review and remediation evidence.
+- `docs/archive/`: historical context that is not a current requirement.
 - `scripts/`: current operational and data-acquisition utilities.
 - `artifacts/`: local or generated ML outputs. Do not add generated binaries or
   run outputs to Git unless the task explicitly requires a reviewed fixture.
@@ -91,6 +98,11 @@ Before editing, read the task, the relevant implementation and tests, and any
 applicable ADRs. Treat executable contracts and accepted ADRs as authoritative
 for frozen behavior. If documentation and code disagree, report the conflict;
 do not silently choose the more convenient interpretation.
+
+Start documentation discovery at `docs/README.md` and use `docs/catalog.yaml`
+to identify current sources. Review reports are audit evidence, and archived
+documents are historical only; neither overrides current code, tests, accepted
+ADRs, or cataloged current documentation.
 
 When a task defines `IN SCOPE`, `OUT OF SCOPE`, `MUST PRESERVE`, or
 `ACCEPTANCE CRITERIA`, those sections are authoritative. Implement the smallest
@@ -228,6 +240,16 @@ It validates installed dependencies and runs the complete test suite. Use
 scope. Formatting remains an explicit check because the current repository has
 pre-existing Black baseline drift; do not hide that drift or reformat unrelated
 files as part of another task.
+
+The canonical gate also runs:
+
+```powershell
+python scripts/validate_docs.py
+```
+
+Run it directly while reorganizing or editing documentation. It enforces the
+documentation root taxonomy, catalog coverage, non-empty documents, kebab-case
+filenames, category indexes, archive banners, and local-link integrity.
 
 For normal Python changes:
 
