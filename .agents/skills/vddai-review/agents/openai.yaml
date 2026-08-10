@@ -1,0 +1,4 @@
+interface:
+  display_name: "VDDAI Review"
+  short_description: "Review VDDAI changes and write an actionable report"
+  default_prompt: "Use $vddai-review to independently review this VDDAI change, write a durable report for agent remediation, and return prioritized findings plus a verdict."

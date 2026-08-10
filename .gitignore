@@ -28,8 +28,6 @@ artifacts/weights/
 *.safetensors
 *.onnx
 
-docs/
-
 # Local datasets
 data/raw/
 data/processed/
