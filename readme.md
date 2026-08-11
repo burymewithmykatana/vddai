@@ -16,6 +16,7 @@ detector tied to one product category.
 | Run the API on my machine | [Local development](#local-development-api-on-the-host) |
 | Run the complete stack | [Docker development](#docker-development-all-services) |
 | Configure the real model package | [Configuration](#configuration) and [Week 5 production inference](#week-5-production-inference) |
+| Track and query the Week 4 baseline | [Week 6 experiment tracking](#week-6-experiment-tracking) |
 | Reproduce the data and model baseline | [MVTec AD dataset](#mvtec-ad-tile-dataset) and [Week 4 baseline](#week-4-complete) |
 | Understand image transformations | [Image preprocessing contract](#image-preprocessing-contract) |
 | Navigate product, architecture, and engineering documentation | [Documentation index](docs/README.md) |
@@ -795,6 +796,51 @@ lineage, and read only by an authorized user; corrupt input must end in a safe
 failed state. The executable evidence is the inference-contract, package-loader,
 inference-service, worker/API integration, ownership, orphan-cleanup, rollback,
 and Alembic upgrade/downgrade tests in `app/tests`.
+
+## Week 6 Experiment Tracking
+
+W6D2 records the frozen Week 4 baseline in a queryable local SQLite ledger. It
+does not rerun or retune the official-test evaluation. The import validates the
+existing run manifest, frozen train/validation/test protocol, dataset and
+feature-extractor lineage, feature bank, score artifact, evaluation members,
+and every recorded SHA-256 checksum before creating a completed experiment.
+
+Commit the tracking implementation first so the run receives an exact, clean
+Git revision. Then track the existing baseline with an immutable run ID:
+
+```powershell
+python -m ml.track_baseline_experiment `
+  --run-id week4-baseline-q95-20260729
+```
+
+The default ledger is
+`artifacts/experiments/experiments.sqlite3`. It is generated and excluded from
+Git together with feature banks, scores, thresholds, evaluations, model
+weights, and datasets. The experiment records the ResNet-18 extractor and
+weights, feature layer and dimension, scorer and `k`, threshold policy,
+quantile and value, random seed, dataset version and manifest fingerprint,
+full code revision, headline evaluation metrics, artifact locations and
+checksums, schema/code versions, timestamps, and terminal status.
+
+Query one run:
+
+```powershell
+python -m ml.query_experiments --run-id week4-baseline-q95-20260729
+```
+
+Query completed runs or filter by dataset version:
+
+```powershell
+python -m ml.query_experiments --status completed
+python -m ml.query_experiments --dataset-version <dataset-version>
+```
+
+Run IDs are immutable. Completed and failed runs are terminal, and a duplicate
+ID is rejected rather than overwritten. Experiment tracking is evidence only:
+it does not register a model candidate, promote a package, change serving
+configuration, or bypass the human approval required for production promotion.
+See
+`docs/decisions/0006-queryable-experiment-ledger.md` for the durable boundary.
 
 ## Roadmap
 

@@ -18,6 +18,7 @@ artifacts/feature_banks/
 artifacts/anomaly_scores/
 artifacts/thresholds/
 artifacts/evaluations/
+artifacts/experiments/
 artifacts/models/
 artifacts/weights/
 

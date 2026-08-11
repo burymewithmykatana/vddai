@@ -52,3 +52,7 @@ documents:
     area: decisions
     kind: architecture-decision
     status: accepted
+  - path: docs/decisions/0006-queryable-experiment-ledger.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted
