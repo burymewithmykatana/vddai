@@ -16,6 +16,7 @@ detector tied to one product category.
 | Run the API on my machine | [Local development](#local-development-api-on-the-host) |
 | Run the complete stack | [Docker development](#docker-development-all-services) |
 | Configure the real model package | [Configuration](#configuration) and [Week 5 production inference](#week-5-production-inference) |
+| Prove the complete inference flow | [W6D1 inference gate](#w6d1-reproducible-real-inference-gate) |
 | Track and query the Week 4 baseline | [Week 6 experiment tracking](#week-6-experiment-tracking) |
 | Reproduce the data and model baseline | [MVTec AD dataset](#mvtec-ad-tile-dataset) and [Week 4 baseline](#week-4-complete) |
 | Understand image transformations | [Image preprocessing contract](#image-preprocessing-contract) |
