@@ -33,8 +33,10 @@ class ConstantFeatureExtractor:
     def __init__(self, value: float = 2.0) -> None:
         self.value = value
         self.received_images: Tensor | None = None
+        self.extract_calls = 0
 
     def extract(self, images: Tensor) -> Tensor:
+        self.extract_calls += 1
         self.received_images = images.clone()
         features = torch.zeros((images.shape[0], self.feature_dim))
         features[:, 0] = self.value

@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import health, prediction
+from app.api.routes import auth, health, prediction
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.db.init_db import init_db
@@ -32,4 +32,5 @@ def root():
 
 
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(prediction.router)
