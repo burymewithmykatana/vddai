@@ -10,6 +10,7 @@ their status or an amendment explicitly says otherwise.
 | [`0003`](0003-production-inference-contract.md) | Accepted | Production inference contract v1 |
 | [`0004`](0004-production-model-package-loader.md) | Accepted | Production model-package loader |
 | [`0005`](0005-inference-result-persistence.md) | Accepted | Auditable inference-result persistence |
+| [`0006`](0006-queryable-experiment-ledger.md) | Accepted | Queryable local experiment ledger |
 
 Create the next zero-padded number for a new decision. Preserve historical
 context, record consequences, and mark replaced decisions as superseded rather
