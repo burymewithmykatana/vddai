@@ -16,6 +16,7 @@ from app.services.model_package_loader import (
     get_production_model_package,
     reset_model_package_cache_for_tests,
 )
+from app.services.promoted_model_resolver import PromotedModelSelection
 from app.tests.model_package_fixtures import (
     ConstantFeatureExtractor,
     PackageFixture,
@@ -303,12 +304,23 @@ def test_cached_package_initializes_once_per_process(
 
     reset_model_package_cache_for_tests()
     monkeypatch.setattr(model_package_loader.ModelPackageLoader, "load", fake_load)
-    monkeypatch.setattr(
-        settings,
-        "MODEL_PACKAGE_MANIFEST_PATH",
-        str(fixture.manifest_path),
+    selection = PromotedModelSelection(
+        model_version="registry-version-a",
+        package_id=loaded_package.package_id,
+        package_manifest_path=fixture.manifest_path.resolve(),
+        package_manifest_sha256=sha256_file(fixture.manifest_path),
+        feature_bank_dir=fixture.feature_bank_dir.resolve(),
+        feature_bank_sha256=loaded_package.lineage.feature_bank_sha256,
+        dataset_name=loaded_package.lineage.dataset_name,
+        dataset_category=loaded_package.lineage.dataset_category,
+        dataset_version=loaded_package.lineage.dataset_version,
+        manifest_fingerprint=loaded_package.lineage.manifest_fingerprint,
     )
-    monkeypatch.setattr(settings, "FEATURE_BANK_DIR", str(fixture.feature_bank_dir))
+    monkeypatch.setattr(
+        model_package_loader,
+        "resolve_production_model_selection",
+        lambda: selection,
+    )
 
     first = get_production_model_package()
     second = get_production_model_package()

@@ -60,3 +60,7 @@ documents:
     area: decisions
     kind: architecture-decision
     status: accepted
+  - path: docs/decisions/0008-registry-selected-production-package.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted

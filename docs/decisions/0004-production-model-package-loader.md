@@ -1,12 +1,13 @@
 # ADR 0004 — Production Model-Package Loader
 
-- Status: Accepted
+- Status: Accepted; amended by ADR 0008
 - Date: 2026-08-03
 - Contract: `vddai.production_inference.v1`
 
 ## Decision
 
-Production selects one promoted Week 4 package through two explicit settings:
+The loader validates one explicitly selected Week 4 package. Originally,
+selection used two settings:
 
 - `MODEL_PACKAGE_MANIFEST_PATH` points to that run's `run_manifest.json`;
 - `FEATURE_BANK_DIR` points to its normal-training feature-bank directory.
@@ -14,6 +15,9 @@ Production selects one promoted Week 4 package through two explicit settings:
 No timestamp scan or "newest run" selection is permitted. The loader follows
 the threshold member declared by the run manifest and cross-validates the
 configured feature bank against both the manifest and threshold lineage.
+
+ADR 0008 replaces direct runtime path selection with the read-only production
+pointer in the model registry. The validation boundary below remains active.
 
 The expected generated layout is:
 
