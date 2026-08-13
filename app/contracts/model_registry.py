@@ -145,6 +145,8 @@ class PromotionCriteria(BaseModel):
             clean_name = name.strip()
             if not clean_name:
                 raise ValueError("Promotion metric names must be non-empty")
+            if clean_name.startswith("test_") or clean_name.endswith("_test"):
+                raise ValueError("Official-test metrics cannot be promotion criteria")
             if isinstance(value, bool) or not math.isfinite(value):
                 raise ValueError("Promotion metric thresholds must be finite")
             normalized[clean_name] = float(value)

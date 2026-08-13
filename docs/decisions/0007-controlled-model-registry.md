@@ -39,7 +39,7 @@ stage.
 Every promotion must provide an actor, reason, target environment, and
 predeclared minimum metrics. Before changing state, the registry verifies:
 
-1. all required metrics exist and meet their declared minimums;
+1. all required validation metrics exist and meet their declared minimums;
 2. the existing production package loader accepts the full artifact contract;
 3. loaded package lineage matches the immutable candidate record; and
 4. one smoke inference returns finite values with the frozen strict
@@ -54,6 +54,10 @@ Promotion attempts are append-only audit records. Approved attempts record the
 previous version, validated checks, actor, reason, and timestamps. Rejected
 attempts retain public-safe rejection reasons and never change environment
 state. Internal exception messages are not stored as registry evidence.
+
+Official-test metrics may be retained as final evaluation evidence but are
+rejected as promotion criteria. This prevents repeated production selection
+from tuning the system against the frozen test set.
 
 ## Human Approval Boundary
 
