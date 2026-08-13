@@ -33,9 +33,9 @@ from app.tests.model_package_fixtures import (
 
 CRITERIA = PromotionCriteria(
     minimum_metrics={
-        "test_roc_auc": 0.90,
-        "test_average_precision": 0.90,
-        "test_threshold_f1": 0.80,
+        "validation_roc_auc": 0.90,
+        "validation_average_precision": 0.90,
+        "validation_threshold_f1": 0.80,
     }
 )
 
@@ -58,9 +58,9 @@ def _candidate(
 ) -> ModelCandidate:
     manifest_sha256 = sha256_file(fixture.manifest_path)
     metrics = {
-        "test_roc_auc": 0.98,
-        "test_average_precision": 0.97,
-        "test_threshold_f1": 0.91,
+        "validation_roc_auc": 0.98,
+        "validation_average_precision": 0.97,
+        "validation_threshold_f1": 0.91,
     }
     metrics.update(metric_override or {})
     return ModelCandidate(
@@ -120,6 +120,11 @@ def test_candidate_requires_derived_immutable_version(tmp_path: Path) -> None:
         )
 
 
+def test_promotion_criteria_reject_official_test_metrics() -> None:
+    with pytest.raises(ValidationError, match="Official-test metrics"):
+        PromotionCriteria(minimum_metrics={"test_roc_auc": 0.90})
+
+
 def test_registration_rejects_manifest_checksum_tampering(tmp_path: Path) -> None:
     fixture = write_package_fixture(tmp_path / "candidate-a")
     package = _load_package(fixture)
@@ -169,7 +174,7 @@ def test_metric_and_package_failures_are_audited_without_state_change(
         fixture,
         package,
         run_id="run-a",
-        metric_override={"test_threshold_f1": 0.50},
+        metric_override={"validation_threshold_f1": 0.50},
     )
     registry = ModelRegistry(tmp_path / "registry.sqlite3", repository_root=tmp_path)
     registry.register_candidate(candidate)
