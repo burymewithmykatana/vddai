@@ -45,7 +45,7 @@ from app.tests.model_package_fixtures import (
 )
 from app.workers.prediction_worker import process_next_prediction
 
-CRITERIA = PromotionCriteria(minimum_metrics={"test_threshold_f1": 0.80})
+CRITERIA = PromotionCriteria(minimum_metrics={"validation_threshold_f1": 0.80})
 
 
 def _load(fixture: PackageFixture) -> ProductionModelPackage:
@@ -79,7 +79,7 @@ def _candidate(
         dataset_version=package.lineage.dataset_version,
         manifest_fingerprint=package.lineage.manifest_fingerprint,
         code_revision="b" * 40,
-        metrics={"values": {"test_threshold_f1": 0.95}},
+        metrics={"values": {"validation_threshold_f1": 0.95}},
         registered_by="ml-owner@example.test",
         registered_at=datetime(2026, 8, 13, tzinfo=timezone.utc),
     )
