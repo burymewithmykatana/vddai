@@ -26,9 +26,15 @@ from app.db.session import SessionLocal, engine
 from app.main import app
 from app.models.prediction import Prediction, PredictionStatus
 from app.models.user import User
-from app.services.anomaly_inference_service import AnomalyInferenceService
+from app.services.anomaly_inference_service import (
+    AnomalyInferenceService,
+    reset_anomaly_inference_service_cache_for_tests,
+)
 from app.services.image_storage_service import image_storage_service
-from app.services.model_package_loader import ModelPackageLoader
+from app.services.model_package_loader import (
+    ModelPackageLoader,
+    reset_model_package_cache_for_tests,
+)
 from app.tests.model_package_fixtures import (
     ConstantFeatureExtractor,
     write_package_fixture,
@@ -174,6 +180,56 @@ def test_health_check(client: TestClient):
     assert data["status"] == "ok"
     assert data["service"] == "vddai-backend"
     assert data["environment"] == "test"
+
+
+@pytest.mark.w6_inference_gate
+def test_registered_user_can_login_and_access_authenticated_predictions(
+    client: TestClient,
+) -> None:
+    credentials = {
+        "email": "w6-auth@example.com",
+        "password": "W6-authentication-password!",
+    }
+
+    register_response = client.post(
+        "/auth/register",
+        json={**credentials, "full_name": "W6 Auth Gate"},
+    )
+    assert register_response.status_code == 201
+    assert register_response.json()["email"] == credentials["email"]
+
+    login_response = client.post("/auth/login", json=credentials)
+    assert login_response.status_code == 200
+    access_token = login_response.json()["access_token"]
+    assert login_response.json()["token_type"] == "bearer"
+
+    history_response = client.get(
+        "/predictions",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert history_response.status_code == 200
+    assert history_response.json() == []
+
+
+@pytest.mark.w6_inference_gate
+@pytest.mark.parametrize(
+    "password",
+    ["short", "é" * 40],
+)
+def test_registration_rejects_passwords_outside_bcrypt_contract(
+    client: TestClient,
+    password: str,
+) -> None:
+    response = client.post(
+        "/auth/register",
+        json={
+            "email": "invalid-password@example.com",
+            "password": password,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]
 
 
 def test_create_prediction_job(
@@ -452,6 +508,7 @@ def test_worker_completes_queued_prediction(
     assert completed_prediction.error_message is None
 
 
+@pytest.mark.w6_inference_gate
 def test_worker_persists_failure(
     client: TestClient,
     db: Session,
@@ -642,6 +699,7 @@ def create_test_inference_service(
     return AnomalyInferenceService(package=package), extractor
 
 
+@pytest.mark.w6_inference_gate
 def test_authenticated_upload_worker_and_readback_use_real_inference_path(
     client: TestClient,
     db: Session,
@@ -740,6 +798,94 @@ def test_authenticated_upload_worker_and_readback_use_real_inference_path(
     assert "image_path" not in result
 
 
+@pytest.mark.w6_inference_gate
+def test_completed_prediction_is_not_claimed_or_scored_twice(
+    db: Session,
+    test_user: User,
+    tmp_path: Path,
+) -> None:
+    prediction = create_queued_prediction(db, test_user.id)
+    image_path = tmp_path / "queued-image.png"
+    image_path.write_bytes(create_image_bytes("PNG"))
+    prediction.image_path = str(image_path)
+    db.commit()
+    inference_service, extractor = create_test_inference_service(tmp_path / "package")
+
+    assert process_next_prediction(db, inference_service=inference_service) is True
+    assert process_next_prediction(db, inference_service=inference_service) is False
+
+    db.expire_all()
+    completed = db.get(Prediction, prediction.id)
+    assert completed is not None
+    assert completed.status == PredictionStatus.COMPLETED.value
+    assert extractor.extract_calls == 1
+
+
+@pytest.mark.w6_inference_gate
+def test_unavailable_production_package_becomes_safe_failed_result(
+    client: TestClient,
+    db: Session,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    upload_directory = tmp_path / "uploads"
+    monkeypatch.setattr(
+        image_storage_service,
+        "upload_directory",
+        upload_directory,
+    )
+    monkeypatch.setattr(
+        settings,
+        "MODEL_PACKAGE_MANIFEST_PATH",
+        str(tmp_path / "missing" / "run_manifest.json"),
+    )
+    monkeypatch.setattr(
+        settings,
+        "FEATURE_BANK_DIR",
+        str(tmp_path / "missing" / "feature-bank"),
+    )
+    reset_anomaly_inference_service_cache_for_tests()
+    reset_model_package_cache_for_tests()
+
+    queued_response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(),
+    )
+    prediction_id = queued_response.json()["prediction_id"]
+
+    try:
+        assert process_next_prediction(db) is False
+    finally:
+        reset_anomaly_inference_service_cache_for_tests()
+        reset_model_package_cache_for_tests()
+
+    db.expire_all()
+    failed = db.get(Prediction, prediction_id)
+    assert failed is not None
+    assert failed.status == PredictionStatus.FAILED.value
+    assert failed.error_message is not None
+    assert failed.error_message.startswith("ModelPackageArtifactError:")
+    assert failed.predicted_label is None
+    assert failed.anomaly_score is None
+    assert failed.threshold is None
+    assert failed.model_version is None
+    assert failed.model_lineage is None
+
+    read_response = client.get(
+        f"/predictions/{prediction_id}",
+        headers=auth_headers,
+    )
+    assert read_response.status_code == 200
+    public_result = read_response.json()
+    assert public_result["status"] == PredictionStatus.FAILED.value
+    assert public_result["failure_code"] == "inference_failed"
+    assert "error_message" not in public_result
+    assert "run_manifest.json" not in read_response.text
+
+
+@pytest.mark.w6_inference_gate
 def test_uploaded_image_preprocessing_failure_becomes_safe_failed_result(
     client: TestClient,
     db: Session,
@@ -830,6 +976,7 @@ def test_create_prediction_rejects_unsupported_file_type(
     )
 
 
+@pytest.mark.w6_inference_gate
 def test_get_prediction_hides_other_users_prediction(
     client: TestClient,
     db: Session,
@@ -966,6 +1113,7 @@ def test_inactive_user_cannot_create_prediction(
     assert response.json()["detail"] == "User account is inactive."
 
 
+@pytest.mark.w6_inference_gate
 def test_create_prediction_rejects_invalid_image_bytes(
     client: TestClient,
     auth_headers: dict[str, str],
