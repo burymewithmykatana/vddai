@@ -122,8 +122,8 @@ MODEL_IMAGE_WIDTH=224
 MODEL_IMAGE_HEIGHT=224
 MODEL_DEVICE=cpu
 WORKER_POLL_INTERVAL_SECONDS=1.0
-FEATURE_BANK_DIR=artifacts/feature_banks/mvtec_ad_tile_train_resnet18
-MODEL_PACKAGE_MANIFEST_PATH=artifacts/evaluations/baseline_q95_20260729/run_manifest.json
+MODEL_REGISTRY_PATH=artifacts/registry/model_registry.sqlite3
+MODEL_ARTIFACT_ROOT=.
 ```
 
 Replace `JWT_SECRET_KEY` before running the application outside isolated local development. Never commit the real `.env` file.
@@ -742,13 +742,18 @@ The worker runs continuously and polls the database-backed queue at the
 configured interval. Docker Compose starts this worker only after the API has
 completed migrations and passed its health check.
 
-`MODEL_PACKAGE_MANIFEST_PATH` explicitly selects the promoted Week 4 run; the
-loader never scans for the newest directory. `FEATURE_BANK_DIR` explicitly
-selects its normal-training bank, whose lineage must match that run. The
-expected serving members are the run's `run_manifest.json` and referenced
-`threshold.json`, plus the bank's `metadata.json` and referenced
-`features.npz`. See
-`docs/decisions/0004-production-model-package-loader.md` for the exact layout.
+`MODEL_REGISTRY_PATH` identifies the local registry and `MODEL_ARTIFACT_ROOT`
+constrains its repository-relative artifact paths. The worker reads exactly the
+version selected by the registry's production pointer; it never scans for the
+newest directory or falls back to legacy paths. The selected package still
+contains the run's `run_manifest.json` and referenced `threshold.json`, plus
+the bank's `metadata.json` and referenced `features.npz`. See ADR 0004 for the
+package validation contract and ADR 0008 for registry-selected serving.
+
+`GET /health/model` reports the immutable selected version and package ID. It
+does not expose registry or artifact paths. A missing or invalid production
+selection returns `503` and inference fails closed until a human-approved
+candidate is promoted.
 
 `ModelPackageLoader` validates both artifact checksums, package-relative paths,
 supported schemas, training/validation split policy, row-aligned archive

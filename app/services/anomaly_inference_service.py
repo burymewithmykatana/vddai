@@ -22,8 +22,10 @@ from app.services.model_package_loader import (
     ModelPackageCompatibilityError,
     ModelPackageError,
     ProductionModelPackage,
-    get_production_model_package,
+    load_promoted_model_package,
+    resolve_production_model_selection,
 )
+from app.services.promoted_model_resolver import PromotedModelSelection
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +88,18 @@ class AnomalyInferenceService:
         )
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=2)
+def _get_anomaly_inference_service_for_selection(
+    selection: PromotedModelSelection,
+) -> AnomalyInferenceService:
+    return AnomalyInferenceService(package=load_promoted_model_package(selection))
+
+
 def get_anomaly_inference_service() -> AnomalyInferenceService:
-    """Reuse one service backed by the process-cached production package."""
-    return AnomalyInferenceService(package=get_production_model_package())
+    """Follow the live production pointer while caching immutable versions."""
+    return _get_anomaly_inference_service_for_selection(
+        resolve_production_model_selection()
+    )
 
 
 def reset_anomaly_inference_service_cache_for_tests() -> None:
@@ -98,4 +108,4 @@ def reset_anomaly_inference_service_cache_for_tests() -> None:
 
     if settings.ENVIRONMENT != "test":
         raise RuntimeError("Inference-service cache reset is restricted to tests.")
-    get_anomaly_inference_service.cache_clear()
+    _get_anomaly_inference_service_for_selection.cache_clear()

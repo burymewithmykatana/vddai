@@ -765,18 +765,45 @@ class ModelPackageLoader:
         return threshold, scorer_k, lineage
 
 
-@lru_cache(maxsize=1)
-def get_production_model_package() -> ProductionModelPackage:
-    """Load the explicitly configured package once per worker process."""
-    return ModelPackageLoader(
-        package_manifest_path=Path(settings.MODEL_PACKAGE_MANIFEST_PATH),
-        feature_bank_dir=Path(settings.FEATURE_BANK_DIR),
+@lru_cache(maxsize=2)
+def load_promoted_model_package(
+    selection: "PromotedModelSelection",
+) -> ProductionModelPackage:
+    """Load and cache a package by its immutable promoted selection."""
+    package = ModelPackageLoader(
+        package_manifest_path=selection.package_manifest_path,
+        feature_bank_dir=selection.feature_bank_dir,
         device=settings.MODEL_DEVICE,
     ).load()
+    from app.services.promoted_model_resolver import validate_selected_package
+
+    validate_selected_package(selection, package)
+    return package
+
+
+def resolve_production_model_selection() -> "PromotedModelSelection":
+    """Read the current production pointer without scanning artifact folders."""
+    from app.services.promoted_model_resolver import PromotedModelResolver
+
+    return PromotedModelResolver(
+        Path(settings.MODEL_REGISTRY_PATH),
+        repository_root=Path(settings.MODEL_ARTIFACT_ROOT),
+    ).resolve()
+
+
+def get_production_model_package() -> ProductionModelPackage:
+    """Resolve the active version and reuse its already-loaded package."""
+    return load_promoted_model_package(resolve_production_model_selection())
 
 
 def reset_model_package_cache_for_tests() -> None:
     """Clear process package state only in the test environment."""
     if settings.ENVIRONMENT != "test":
         raise RuntimeError("Model-package cache reset is restricted to tests.")
-    get_production_model_package.cache_clear()
+    load_promoted_model_package.cache_clear()
+
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.promoted_model_resolver import PromotedModelSelection
