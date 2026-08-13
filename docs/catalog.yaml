@@ -56,3 +56,7 @@ documents:
     area: decisions
     kind: architecture-decision
     status: accepted
+  - path: docs/decisions/0007-controlled-model-registry.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted
