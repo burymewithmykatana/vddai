@@ -16,6 +16,7 @@ detector tied to one product category.
 | Run the API on my machine | [Local development](#local-development-api-on-the-host) |
 | Run the complete stack | [Docker development](#docker-development-all-services) |
 | Configure the real model package | [Configuration](#configuration) and [Week 5 production inference](#week-5-production-inference) |
+| Prove the complete inference flow | [W6D1 inference gate](#w6d1-reproducible-real-inference-gate) |
 | Reproduce the data and model baseline | [MVTec AD dataset](#mvtec-ad-tile-dataset) and [Week 4 baseline](#week-4-complete) |
 | Understand image transformations | [Image preprocessing contract](#image-preprocessing-contract) |
 | Navigate product, architecture, and engineering documentation | [Documentation index](docs/README.md) |
@@ -211,6 +212,10 @@ docker compose up --build -d
 docker compose ps
 ```
 
+The image installs the pinned CPU-only PyTorch and torchvision wheels from the
+official PyTorch package index. This matches `MODEL_DEVICE=cpu` and avoids
+shipping an unused CUDA runtime in the development/production image.
+
 Verify the running application and infrastructure:
 
 ```powershell
@@ -224,6 +229,44 @@ Run the complete test suite inside the API container:
 ```powershell
 docker compose exec api python -m pytest -q
 ```
+
+### W6D1 Reproducible Real-Inference Gate
+
+The deterministic W6D1 regression gate covers authenticated upload and
+readback, the production package-loader/scorer/preprocessing/worker path,
+invalid input, unavailable artifacts, safe worker failure, terminal-job
+non-reprocessing, and non-disclosing cross-owner reads. It creates only
+temporary package fixtures, so generated model binaries remain outside Git:
+
+```powershell
+docker compose exec api python -m pytest -q -m w6_inference_gate
+```
+
+After provisioning the configured Week 4 package, feature bank, and cached
+ResNet-18 checkpoint described in
+[Before Running Real Inference](#before-running-real-inference), prove the
+running API, PostgreSQL queue, production worker, and actual configured package
+with one command:
+
+Docker reads the checkpoint from the ignored repository-local Torch cache. On
+Windows, provision the already-validated host checkpoint once with:
+
+```powershell
+New-Item -ItemType Directory -Force artifacts/weights/hub/checkpoints
+Copy-Item "$env:USERPROFILE/.cache/torch/hub/checkpoints/resnet18-f37072fd.pth" artifacts/weights/hub/checkpoints/
+```
+
+```powershell
+docker compose exec api python scripts/prove_real_inference.py
+```
+
+The deployed-stack probe creates isolated local-development users, uploads a
+small PNG through the authenticated API, confirms another user receives the
+same non-disclosing `404` as a missing prediction, waits for the worker, and
+validates the persisted score, threshold, label, latency, package ID, and
+public-safe lineage. If package members or weights are unavailable, the worker
+fails closed and the probe reports `inference_failed`; inspect the worker logs
+for the private local diagnostic.
 
 View API logs:
 
