@@ -837,14 +837,10 @@ def test_unavailable_production_package_becomes_safe_failed_result(
     )
     monkeypatch.setattr(
         settings,
-        "MODEL_PACKAGE_MANIFEST_PATH",
-        str(tmp_path / "missing" / "run_manifest.json"),
+        "MODEL_REGISTRY_PATH",
+        str(tmp_path / "missing" / "model_registry.sqlite3"),
     )
-    monkeypatch.setattr(
-        settings,
-        "FEATURE_BANK_DIR",
-        str(tmp_path / "missing" / "feature-bank"),
-    )
+    monkeypatch.setattr(settings, "MODEL_ARTIFACT_ROOT", str(tmp_path))
     reset_anomaly_inference_service_cache_for_tests()
     reset_model_package_cache_for_tests()
 
@@ -866,7 +862,7 @@ def test_unavailable_production_package_becomes_safe_failed_result(
     assert failed is not None
     assert failed.status == PredictionStatus.FAILED.value
     assert failed.error_message is not None
-    assert failed.error_message.startswith("ModelPackageArtifactError:")
+    assert failed.error_message.startswith("PromotedModelResolutionError:")
     assert failed.predicted_label is None
     assert failed.anomaly_score is None
     assert failed.threshold is None

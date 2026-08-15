@@ -19,6 +19,7 @@ artifacts/anomaly_scores/
 artifacts/thresholds/
 artifacts/evaluations/
 artifacts/experiments/
+artifacts/registry/
 artifacts/models/
 artifacts/weights/
 
