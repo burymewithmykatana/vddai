@@ -52,9 +52,12 @@ class AnomalyInferenceService:
         self.package = package
         self.preprocessing_service = preprocessing_service
 
-    def predict(self, image_path: str | Path) -> AnomalyInferenceResult:
+    def predict(self, image: bytes | str | Path) -> AnomalyInferenceResult:
         started_at = time.perf_counter()
-        preprocessed = self.preprocessing_service.preprocess(image_path)
+        if isinstance(image, bytes):
+            preprocessed = self.preprocessing_service.preprocess_bytes(image)
+        else:
+            preprocessed = self.preprocessing_service.preprocess(image)
         images = torch.from_numpy(preprocessed.array).unsqueeze(0)
 
         features = self.package.feature_extractor.extract(images)

@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import pytest
 from PIL import Image
@@ -30,7 +29,13 @@ from app.services.anomaly_inference_service import (
     AnomalyInferenceService,
     reset_anomaly_inference_service_cache_for_tests,
 )
-from app.services.image_storage_service import image_storage_service
+from app.services.image_storage_service import (
+    ImageStorageError,
+    LocalFilesystemImageObjectStore,
+    StoredImageNotFoundError,
+    StoredObject,
+    image_storage_service,
+)
 from app.services.model_package_loader import (
     ModelPackageLoader,
     reset_model_package_cache_for_tests,
@@ -113,7 +118,7 @@ def test_user(db: Session) -> User:
 def create_queued_prediction(db: Session, user_id: int) -> Prediction:
     prediction = Prediction(
         user_id=user_id,
-        image_path="uploads/test_image_001.jpg",
+        image_object_key="predictions/test_image_001.jpg",
         image_format="JPEG",
         image_width=16,
         image_height=16,
@@ -238,45 +243,39 @@ def test_create_prediction_job(
     test_user: User,
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
-    with TemporaryDirectory(
-        prefix="vddai-test-uploads-",
-        dir=".",
-    ) as temporary_directory:
-        upload_directory = Path(temporary_directory)
+    object_store = configure_local_image_storage(
+        monkeypatch,
+        tmp_path / "objects",
+    )
+    image_contents = create_image_bytes("JPEG")
 
-        monkeypatch.setattr(
-            image_storage_service,
-            "upload_directory",
-            upload_directory,
-        )
-        image_contents = create_image_bytes("JPEG")
+    response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(
+            content=image_contents,
+            filename="client-selected-name.jpg",
+        ),
+    )
 
-        response = client.post(
-            "/predictions",
-            headers=auth_headers,
-            files=image_upload(content=image_contents),
-        )
+    assert response.status_code == 202
 
-        assert response.status_code == 202
+    data = response.json()
 
-        data = response.json()
+    assert data["prediction_id"] > 0
+    assert data["status"] == PredictionStatus.QUEUED.value
+    assert data["message"] == "Prediction job queued successfully."
 
-        assert data["prediction_id"] > 0
-        assert data["status"] == PredictionStatus.QUEUED.value
-        assert data["message"] == "Prediction job queued successfully."
+    prediction = db.get(Prediction, data["prediction_id"])
 
-        prediction = db.get(Prediction, data["prediction_id"])
-
-        assert prediction is not None
-        assert prediction.user_id == test_user.id
-        assert prediction.image_path.startswith(upload_directory.as_posix())
-        assert prediction.image_path.endswith(".jpg")
-
-        stored_image = Path(prediction.image_path)
-
-        assert stored_image.exists()
-        assert stored_image.read_bytes() == image_contents
+    assert prediction is not None
+    assert prediction.user_id == test_user.id
+    assert prediction.image_object_key.startswith("predictions/")
+    assert prediction.image_object_key.endswith(".jpg")
+    assert "client-selected-name" not in prediction.image_object_key
+    assert object_store.read(prediction.image_object_key) == image_contents
 
 
 def test_create_prediction_commit_failure_removes_orphaned_upload(
@@ -286,12 +285,18 @@ def test_create_prediction_commit_failure_removes_orphaned_upload(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    upload_directory = tmp_path / "uploads"
-    monkeypatch.setattr(
-        image_storage_service,
-        "upload_directory",
-        upload_directory,
+    object_store = configure_local_image_storage(
+        monkeypatch,
+        tmp_path / "objects",
     )
+    deleted_keys: list[str] = []
+    real_delete = object_store.delete
+
+    def record_delete(object_key: str) -> bool:
+        deleted_keys.append(object_key)
+        return real_delete(object_key)
+
+    monkeypatch.setattr(object_store, "delete", record_delete)
     failing_session = SessionLocal()
 
     def fail_commit() -> None:
@@ -313,9 +318,95 @@ def test_create_prediction_commit_failure_removes_orphaned_upload(
     finally:
         failing_session.close()
 
-    assert upload_directory.exists()
-    assert list(upload_directory.iterdir()) == []
+    assert len(deleted_keys) == 1
+    assert deleted_keys[0].startswith("predictions/")
+    assert not any(path.is_file() for path in (tmp_path / "objects").rglob("*"))
     assert db.query(Prediction).count() == 0
+
+
+def test_storage_write_failure_does_not_create_prediction(
+    client: TestClient,
+    db: Session,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingWriteObjectStore:
+        def write(self, object_key: str, contents: bytes) -> StoredObject:
+            raise ImageStorageError("simulated storage write failure")
+
+        def read(self, object_key: str) -> bytes:
+            raise AssertionError("read must not be called")
+
+        def delete(self, object_key: str) -> bool:
+            raise AssertionError("delete must not be called")
+
+        def exists(self, object_key: str) -> bool:
+            return False
+
+    monkeypatch.setattr(
+        image_storage_service,
+        "object_store",
+        FailingWriteObjectStore(),
+    )
+
+    response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(),
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "The uploaded image could not be stored."
+    assert db.query(Prediction).count() == 0
+
+
+def test_cleanup_failure_is_logged_without_hiding_database_failure(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class CleanupFailingObjectStore:
+        def write(self, object_key: str, contents: bytes) -> StoredObject:
+            return StoredObject(object_key=object_key, size_bytes=len(contents))
+
+        def read(self, object_key: str) -> bytes:
+            raise AssertionError("read must not be called")
+
+        def delete(self, object_key: str) -> bool:
+            raise ImageStorageError("simulated cleanup failure")
+
+        def exists(self, object_key: str) -> bool:
+            return True
+
+    monkeypatch.setattr(
+        image_storage_service,
+        "object_store",
+        CleanupFailingObjectStore(),
+    )
+    failing_session = SessionLocal()
+
+    def fail_commit() -> None:
+        raise SQLAlchemyError("original database failure")
+
+    monkeypatch.setattr(failing_session, "commit", fail_commit)
+
+    def override_get_db():
+        yield failing_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with caplog.at_level("ERROR"):
+            with pytest.raises(SQLAlchemyError, match="original database failure"):
+                client.post(
+                    "/predictions",
+                    headers=auth_headers,
+                    files=image_upload(),
+                )
+    finally:
+        failing_session.close()
+
+    assert "failed_to_delete_orphaned_image" in caplog.text
 
 
 def test_create_prediction_requires_authentication(
@@ -455,12 +546,13 @@ def test_completed_prediction_read_includes_score_and_lineage(
 def test_worker_completes_queued_prediction(
     db: Session,
     test_user: User,
+    worker_storage: "StubImageStorage",
 ):
     prediction = create_queued_prediction(db, test_user.id)
 
     class DeterministicInferenceService:
-        def predict(self, image_path: str) -> AnomalyInferenceResult:
-            assert image_path == "uploads/test_image_001.jpg"
+        def predict(self, image_contents: bytes) -> AnomalyInferenceResult:
+            assert image_contents == worker_storage.contents
             with SessionLocal() as inspection_session:
                 processing = inspection_session.get(Prediction, prediction.id)
                 assert processing is not None
@@ -486,6 +578,7 @@ def test_worker_completes_queued_prediction(
     was_processed = process_next_prediction(
         db,
         inference_service=DeterministicInferenceService(),
+        storage_service=worker_storage,
     )
 
     db.expire_all()
@@ -506,6 +599,7 @@ def test_worker_completes_queued_prediction(
     assert completed_prediction.completed_at is not None
     assert completed_prediction.completed_at.tzinfo is None
     assert completed_prediction.error_message is None
+    assert worker_storage.read_keys == [prediction.image_object_key]
 
 
 @pytest.mark.w6_inference_gate
@@ -513,6 +607,7 @@ def test_worker_persists_failure(
     client: TestClient,
     db: Session,
     test_user: User,
+    worker_storage: "StubImageStorage",
 ):
     prediction = create_queued_prediction(db, test_user.id)
     prediction.predicted_label = PredictionLabel.ANOMALOUS.value
@@ -529,12 +624,13 @@ def test_worker_persists_failure(
     db.commit()
 
     class FailingInferenceService:
-        def predict(self, image_path: str) -> AnomalyInferenceResult:
+        def predict(self, image_contents: bytes) -> AnomalyInferenceResult:
             raise RuntimeError("Simulated inference failure")
 
     was_processed = process_next_prediction(
         db,
         inference_service=FailingInferenceService(),
+        storage_service=worker_storage,
     )
 
     db.expire_all()
@@ -572,16 +668,62 @@ def test_worker_persists_failure(
     assert "Simulated inference failure" not in response.text
 
 
+@pytest.mark.parametrize(
+    "storage_error",
+    [
+        StoredImageNotFoundError("stored object missing"),
+        ImageStorageError("stored object unreadable"),
+    ],
+)
+def test_worker_storage_read_failure_becomes_safe_terminal_failure(
+    db: Session,
+    test_user: User,
+    storage_error: ImageStorageError,
+) -> None:
+    prediction = create_queued_prediction(db, test_user.id)
+    read_keys: list[str] = []
+
+    class FailingStorage:
+        def read(self, object_key: str) -> bytes:
+            read_keys.append(object_key)
+            raise storage_error
+
+    class UnexpectedInferenceService:
+        def predict(self, image_contents: bytes) -> AnomalyInferenceResult:
+            raise AssertionError("Inference must not run after storage read failure")
+
+    was_processed = process_next_prediction(
+        db,
+        inference_service=UnexpectedInferenceService(),
+        storage_service=FailingStorage(),
+    )
+
+    assert was_processed is False
+    db.expire_all()
+    failed = db.get(Prediction, prediction.id)
+    assert failed is not None
+    assert failed.status == PredictionStatus.FAILED.value
+    assert failed.failure_code == PredictionFailureCode.INFERENCE_FAILED.value
+    assert failed.predicted_label is None
+    assert failed.anomaly_score is None
+    assert failed.processing_started_at is not None
+    assert failed.completed_at is not None
+    assert failed.error_message is not None
+    assert failed.error_message.startswith(type(storage_error).__name__)
+    assert read_keys == [prediction.image_object_key]
+
+
 def test_result_commit_failure_rolls_back_and_session_processes_next_job(
     db: Session,
     test_user: User,
     monkeypatch: pytest.MonkeyPatch,
+    worker_storage: "StubImageStorage",
 ) -> None:
     first = create_queued_prediction(db, test_user.id)
     second = create_queued_prediction(db, test_user.id)
 
     class DeterministicInferenceService:
-        def predict(self, image_path: str) -> AnomalyInferenceResult:
+        def predict(self, image_contents: bytes) -> AnomalyInferenceResult:
             lineage = create_model_lineage(
                 package_id="package-transaction-v1",
                 threshold=2.0,
@@ -609,6 +751,7 @@ def test_result_commit_failure_rolls_back_and_session_processes_next_job(
     first_processed = process_next_prediction(
         db,
         inference_service=DeterministicInferenceService(),
+        storage_service=worker_storage,
     )
     monkeypatch.setattr(db, "commit", real_commit)
 
@@ -628,6 +771,7 @@ def test_result_commit_failure_rolls_back_and_session_processes_next_job(
     second_processed = process_next_prediction(
         db,
         inference_service=DeterministicInferenceService(),
+        storage_service=worker_storage,
     )
 
     assert second_processed is True
@@ -684,6 +828,30 @@ def image_upload(
     }
 
 
+class StubImageStorage:
+    def __init__(self, contents: bytes) -> None:
+        self.contents = contents
+        self.read_keys: list[str] = []
+
+    def read(self, object_key: str) -> bytes:
+        self.read_keys.append(object_key)
+        return self.contents
+
+
+@pytest.fixture
+def worker_storage() -> StubImageStorage:
+    return StubImageStorage(create_image_bytes("PNG"))
+
+
+def configure_local_image_storage(
+    monkeypatch: pytest.MonkeyPatch,
+    root_directory: Path,
+) -> LocalFilesystemImageObjectStore:
+    object_store = LocalFilesystemImageObjectStore(root_directory)
+    monkeypatch.setattr(image_storage_service, "object_store", object_store)
+    return object_store
+
+
 def create_test_inference_service(
     tmp_path: Path,
     *,
@@ -708,11 +876,9 @@ def test_authenticated_upload_worker_and_readback_use_real_inference_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    upload_directory = tmp_path / "uploads"
-    monkeypatch.setattr(
-        image_storage_service,
-        "upload_directory",
-        upload_directory,
+    object_store = configure_local_image_storage(
+        monkeypatch,
+        tmp_path / "objects",
     )
     inference_service, extractor = create_test_inference_service(
         tmp_path / "package",
@@ -738,7 +904,8 @@ def test_authenticated_upload_worker_and_readback_use_real_inference_path(
     assert queued.status == PredictionStatus.QUEUED.value
     assert queued.processing_started_at is None
     assert queued.completed_at is None
-    assert Path(queued.image_path).parent == upload_directory
+    assert queued.image_object_key.startswith("predictions/")
+    assert object_store.exists(queued.image_object_key)
 
     was_processed = process_next_prediction(
         db,
@@ -803,16 +970,27 @@ def test_completed_prediction_is_not_claimed_or_scored_twice(
     db: Session,
     test_user: User,
     tmp_path: Path,
+    worker_storage: StubImageStorage,
 ) -> None:
     prediction = create_queued_prediction(db, test_user.id)
-    image_path = tmp_path / "queued-image.png"
-    image_path.write_bytes(create_image_bytes("PNG"))
-    prediction.image_path = str(image_path)
-    db.commit()
     inference_service, extractor = create_test_inference_service(tmp_path / "package")
 
-    assert process_next_prediction(db, inference_service=inference_service) is True
-    assert process_next_prediction(db, inference_service=inference_service) is False
+    assert (
+        process_next_prediction(
+            db,
+            inference_service=inference_service,
+            storage_service=worker_storage,
+        )
+        is True
+    )
+    assert (
+        process_next_prediction(
+            db,
+            inference_service=inference_service,
+            storage_service=worker_storage,
+        )
+        is False
+    )
 
     db.expire_all()
     completed = db.get(Prediction, prediction.id)
@@ -829,11 +1007,9 @@ def test_unavailable_production_package_becomes_safe_failed_result(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    upload_directory = tmp_path / "uploads"
-    monkeypatch.setattr(
-        image_storage_service,
-        "upload_directory",
-        upload_directory,
+    configure_local_image_storage(
+        monkeypatch,
+        tmp_path / "objects",
     )
     monkeypatch.setattr(
         settings,
@@ -889,11 +1065,9 @@ def test_uploaded_image_preprocessing_failure_becomes_safe_failed_result(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    upload_directory = tmp_path / "uploads"
-    monkeypatch.setattr(
-        image_storage_service,
-        "upload_directory",
-        upload_directory,
+    object_store = configure_local_image_storage(
+        monkeypatch,
+        tmp_path / "objects",
     )
     inference_service, _ = create_test_inference_service(tmp_path / "package")
     queued_response = client.post(
@@ -905,7 +1079,8 @@ def test_uploaded_image_preprocessing_failure_becomes_safe_failed_result(
     db.expire_all()
     queued = db.get(Prediction, prediction_id)
     assert queued is not None
-    Path(queued.image_path).write_bytes(b"corrupt-after-storage")
+    assert object_store.delete(queued.image_object_key) is True
+    object_store.write(queued.image_object_key, b"corrupt-after-storage")
 
     was_processed = process_next_prediction(
         db,
@@ -929,7 +1104,7 @@ def test_uploaded_image_preprocessing_failure_becomes_safe_failed_result(
     assert failed.completed_at.tzinfo is None
     assert failed.error_message is not None
     assert failed.error_message.startswith("ImagePreprocessingError:")
-    assert Path(failed.image_path).exists()
+    assert object_store.exists(failed.image_object_key)
 
     read_response = client.get(
         f"/predictions/{prediction_id}",
@@ -1156,36 +1331,29 @@ def test_create_prediction_accepts_png_image(
     test_user: User,
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
-    with TemporaryDirectory(
-        prefix="vddai-test-png-",
-        dir=".",
-    ) as temporary_directory:
-        upload_directory = Path(temporary_directory)
+    object_store = configure_local_image_storage(
+        monkeypatch,
+        tmp_path / "objects",
+    )
+    png_contents = create_image_bytes("PNG")
 
-        monkeypatch.setattr(
-            image_storage_service,
-            "upload_directory",
-            upload_directory,
-        )
+    response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(
+            content=png_contents,
+            filename="test.png",
+            content_type="image/png",
+        ),
+    )
 
-        png_contents = create_image_bytes("PNG")
+    assert response.status_code == 202
 
-        response = client.post(
-            "/predictions",
-            headers=auth_headers,
-            files=image_upload(
-                content=png_contents,
-                filename="test.png",
-                content_type="image/png",
-            ),
-        )
+    prediction_id = response.json()["prediction_id"]
+    prediction = db.get(Prediction, prediction_id)
 
-        assert response.status_code == 202
-
-        prediction_id = response.json()["prediction_id"]
-        prediction = db.get(Prediction, prediction_id)
-
-        assert prediction is not None
-        assert prediction.image_path.endswith(".png")
-        assert Path(prediction.image_path).exists()
+    assert prediction is not None
+    assert prediction.image_object_key.endswith(".png")
+    assert object_store.read(prediction.image_object_key) == png_contents

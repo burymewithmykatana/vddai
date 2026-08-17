@@ -27,6 +27,10 @@ from app.services import model_package_loader
 from app.services.anomaly_inference_service import (
     reset_anomaly_inference_service_cache_for_tests,
 )
+from app.services.image_storage_service import (
+    ImageStorageService,
+    LocalFilesystemImageObjectStore,
+)
 from app.services.model_package_loader import (
     ModelPackageLoader,
     ProductionModelPackage,
@@ -111,10 +115,15 @@ def _promote(
     )
 
 
-def _queue_prediction(db: Session, *, user_id: int, image_path: Path) -> Prediction:
+def _queue_prediction(
+    db: Session,
+    *,
+    user_id: int,
+    image_object_key: str,
+) -> Prediction:
     prediction = Prediction(
         user_id=user_id,
-        image_path=str(image_path),
+        image_object_key=image_object_key,
         image_format="PNG",
         image_width=16,
         image_height=16,
@@ -225,16 +234,32 @@ def test_worker_follows_promotion_and_rollback_without_restart(
         db.refresh(user)
         image_path = tmp_path / "tile.png"
         Image.new("RGB", (16, 16), color=(120, 80, 40)).save(image_path)
+        image_object_key = "predictions/registry-worker.png"
+        storage_service = ImageStorageService(
+            LocalFilesystemImageObjectStore(tmp_path / "objects")
+        )
+        storage_service.object_store.write(
+            image_object_key,
+            image_path.read_bytes(),
+        )
 
-        first = _queue_prediction(db, user_id=user.id, image_path=image_path)
-        assert process_next_prediction(db) is True
+        first = _queue_prediction(
+            db,
+            user_id=user.id,
+            image_object_key=image_object_key,
+        )
+        assert process_next_prediction(db, storage_service=storage_service) is True
         db.expire_all()
         assert db.get(Prediction, first.id).model_version == candidate_a.package_id
 
         _promote(registry, candidate_b, package_b, ModelStage.STAGING)
         _promote(registry, candidate_b, package_b, ModelStage.PRODUCTION)
-        second = _queue_prediction(db, user_id=user.id, image_path=image_path)
-        assert process_next_prediction(db) is True
+        second = _queue_prediction(
+            db,
+            user_id=user.id,
+            image_object_key=image_object_key,
+        )
+        assert process_next_prediction(db, storage_service=storage_service) is True
         db.expire_all()
         assert db.get(Prediction, second.id).model_version == candidate_b.package_id
 
@@ -250,8 +275,12 @@ def test_worker_follows_promotion_and_rollback_without_restart(
             ),
             smoke_inference=_smoke,
         )
-        third = _queue_prediction(db, user_id=user.id, image_path=image_path)
-        assert process_next_prediction(db) is True
+        third = _queue_prediction(
+            db,
+            user_id=user.id,
+            image_object_key=image_object_key,
+        )
+        assert process_next_prediction(db, storage_service=storage_service) is True
         db.expire_all()
         assert db.get(Prediction, third.id).model_version == candidate_a.package_id
     finally:

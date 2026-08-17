@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
+from typing import BinaryIO
 
 import numpy as np
 from numpy.typing import NDArray
@@ -43,8 +45,22 @@ class ImagePreprocessingService:
                 f"Image file does not exist: {path.as_posix()}"
             )
 
+        return self._preprocess_source(path, source_description=path.as_posix())
+
+    def preprocess_bytes(self, contents: bytes) -> PreprocessedImage:
+        return self._preprocess_source(
+            BytesIO(contents),
+            source_description="stored image object",
+        )
+
+    def _preprocess_source(
+        self,
+        source: str | Path | BinaryIO,
+        *,
+        source_description: str,
+    ) -> PreprocessedImage:
         try:
-            with Image.open(path) as image:
+            with Image.open(source) as image:
                 original_width, original_height = image.size
 
                 oriented_image = ImageOps.exif_transpose(image)
@@ -62,7 +78,7 @@ class ImagePreprocessingService:
 
         except (UnidentifiedImageError, OSError, ValueError) as exc:
             raise ImagePreprocessingError(
-                f"Image could not be preprocessed: {path.as_posix()}"
+                f"Image could not be preprocessed: {source_description}"
             ) from exc
 
         array /= 255.0

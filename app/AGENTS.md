@@ -10,7 +10,7 @@ and human approval boundaries still apply.
 
 ```text
 authenticated upload
-  -> validated server-controlled image storage
+  -> validated backend-independent image storage
   -> queued database row
   -> worker claim
   -> frozen-package inference
@@ -87,8 +87,9 @@ Uploaded files must remain size-limited, non-empty, content-decoded, restricted
 to the supported JPEG/PNG/WebP formats, consistent with their declared media
 type, and positive in width and height.
 
-Storage names are server-generated. API clients must not choose destination
-paths. Public responses expose safe image metadata, not `image_path`.
+Storage object keys are server-generated. API clients must not choose keys or
+destination paths. Public responses expose safe image metadata, not the opaque
+key or its backend-specific location.
 
 The current create flow stores the validated image before inserting the queued
 prediction. If database persistence fails, preserve all three behaviors:
@@ -97,9 +98,10 @@ prediction. If database persistence fails, preserve all three behaviors:
 2. attempt to delete the newly stored orphan;
 3. log cleanup failure internally without replacing the original failure.
 
-Do not broaden deletion to client-supplied or unvalidated paths. Multi-instance
-object storage and record-coupled file deletion are deferred architecture work,
-not assumptions about current behavior.
+Do not broaden deletion to client-supplied or unvalidated keys. The API and
+worker use the image-storage service contract; only its local implementation
+may resolve keys to filesystem paths. Provisioning a distributed object-store
+backend and record-coupled deletion remain deferred implementation work.
 
 ## Database and Transaction Rules
 
@@ -159,7 +161,7 @@ Preserve the worker sequence:
 1. select the oldest queued row by creation time and ID;
 2. claim it with `FOR UPDATE SKIP LOCKED`;
 3. transition it to timestamped `processing` and commit the claim;
-4. run inference using only its stored server-controlled image path;
+4. retrieve its stored input through the image-storage service by opaque key;
 5. persist the full completed result in one transaction; or
 6. roll back, reload the row, clear stale result data, and attempt to persist a
    safe terminal failure.
@@ -218,7 +220,8 @@ Treat these as high-priority findings in `app/` changes:
 
 - authentication or ownership can be bypassed;
 - public responses expose internal paths, diagnostics, secrets, or hashes;
-- upload persistence can leave an avoidable orphan after transaction failure;
+- upload persistence can leave an avoidable object orphan after transaction
+  failure;
 - lifecycle transitions permit partial, stale, or contradictory results;
 - worker transaction changes allow duplicate claims or invalid intermediate
   states;

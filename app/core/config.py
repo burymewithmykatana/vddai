@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +14,8 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 60
 
     MAX_IMAGE_SIZE_MB: int = 5
+    IMAGE_STORAGE_BACKEND: Literal["local"] = "local"
+    IMAGE_STORAGE_ROOT: str = "uploads"
 
     MODEL_IMAGE_WIDTH: int = 224
     MODEL_IMAGE_HEIGHT: int = 224

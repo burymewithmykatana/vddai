@@ -12,13 +12,19 @@ from app.contracts.inference import (
 from app.db.session import SessionLocal
 from app.models.prediction import Prediction, PredictionStatus
 from app.services.anomaly_inference_service import get_anomaly_inference_service
+from app.services.image_storage_service import image_storage_service
 
 logger = logging.getLogger(__name__)
 
 
 class InferenceService(Protocol):
-    def predict(self, image_path: str) -> AnomalyInferenceResult:
+    def predict(self, image_contents: bytes) -> AnomalyInferenceResult:
         """Return one frozen-package image-level prediction."""
+
+
+class PredictionImageStorage(Protocol):
+    def read(self, object_key: str) -> bytes:
+        """Retrieve one prediction input by opaque object key."""
 
 
 def _utc_now_naive() -> dt.datetime:
@@ -74,6 +80,7 @@ def _mark_prediction_failed(
 def process_next_prediction(
     db: Session,
     inference_service: InferenceService | None = None,
+    storage_service: PredictionImageStorage | None = None,
 ) -> bool:
     prediction = (
         db.query(Prediction)
@@ -88,7 +95,7 @@ def process_next_prediction(
         return False
 
     prediction_id = prediction.id
-    stored_image_path = prediction.image_path
+    image_object_key = prediction.image_object_key
     logger.info(
         "worker_started_prediction prediction_id=%s",
         prediction_id,
@@ -107,7 +114,9 @@ def process_next_prediction(
 
     try:
         service = inference_service or get_anomaly_inference_service()
-        result = service.predict(stored_image_path)
+        storage = storage_service or image_storage_service
+        image_contents = storage.read(image_object_key)
+        result = service.predict(image_contents)
 
         prediction.complete(result, at=_utc_now_naive())
 
