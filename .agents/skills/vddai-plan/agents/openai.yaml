@@ -1,0 +1,4 @@
+interface:
+  display_name: "VDDAI Plan"
+  short_description: "Plan VDDAI changes before implementation"
+  default_prompt: "Use $vddai-plan to inspect this approved VDDAI task and produce an implementation-ready Coder handoff without changing production code."
