@@ -1,0 +1,4 @@
+interface:
+  display_name: "VDDAI Code"
+  short_description: "Implement approved VDDAI plans safely"
+  default_prompt: "Use $vddai-code to implement an approved VDDAI Coder handoff, run applicable verification, and prepare evidence for independent review."
