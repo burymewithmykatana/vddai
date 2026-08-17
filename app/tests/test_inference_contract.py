@@ -242,7 +242,7 @@ def test_prediction_domain_atomically_completes_full_result() -> None:
     created_at = datetime(2026, 8, 3, 12, 0, 0)
     prediction = Prediction(
         user_id=1,
-        image_path="uploads/internal.png",
+        image_object_key="predictions/internal.png",
         image_format="PNG",
         image_width=32,
         image_height=32,
@@ -283,7 +283,7 @@ def test_prediction_domain_failure_clears_stale_result() -> None:
     created_at = datetime(2026, 8, 3, 12, 0, 0)
     prediction = Prediction(
         user_id=1,
-        image_path="uploads/internal.png",
+        image_object_key="predictions/internal.png",
         image_format="PNG",
         image_width=32,
         image_height=32,

@@ -1,6 +1,6 @@
 # ADR 0003 — Production Inference Contract v1
 
-- Status: Accepted
+- Status: Accepted; storage boundary amended by ADR 0009
 - Date: 2026-08-01
 - Contract schema: `vddai.production_inference.v1`
 - Package schema: `vddai.inference_package.v1`
@@ -16,10 +16,20 @@ The executable definitions live in `app/contracts/inference.py`.
 ## Input Boundary
 
 The API authenticates the caller and stores a prediction owned by that user.
-Serving accepts only the server-generated stored-image path; it never accepts a
-client path. Before storage, the upload is size-limited, non-empty, decoded and
-verified by Pillow, limited to JPEG/PNG/WebP, checked against its declared media
-type, checked for positive dimensions, and saved under a UUID filename.
+ADR 0009 replaces the API-to-worker filesystem-path coupling with an opaque
+server-generated object key. The worker resolves that key through the
+configured image-storage backend and passes the returned bytes into this
+unchanged preprocessing pipeline. It never accepts a client path or key.
+Before storage, the upload is size-limited, non-empty, decoded and verified by
+Pillow, limited to JPEG/PNG/WebP, checked against its declared media type, and
+checked for positive dimensions.
+
+The executable v1 `source` label retains its historical
+`server_controlled_stored_image_path` value for frozen-contract compatibility.
+After ADR 0009 it describes the server-controlled stored-image source resolved
+immediately before preprocessing; it does not define the database value or an
+API-to-worker filesystem-path contract. Pixel transformation, tensor, scoring,
+threshold, label, lineage, and latency semantics are unchanged.
 
 Deterministic online preprocessing is exactly:
 

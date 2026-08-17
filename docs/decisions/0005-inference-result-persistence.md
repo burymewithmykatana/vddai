@@ -1,6 +1,6 @@
 # ADR 0005 — Auditable Inference Result Persistence
 
-- Status: Accepted
+- Status: Accepted; storage field semantics amended by ADR 0009
 - Date: 2026-08-03
 - Migration revision: `20260803_02`
 
@@ -36,7 +36,10 @@ presented as a probability.
 
 All persisted timestamps use the repository's timezone-naive UTC convention.
 The authenticated read API returns safe image metadata and an opaque record ID,
-not the internal `image_path`.
+not the image object key or an internal storage location. Under ADR 0009 the
+existing physical `image_path` column stores an opaque object key; the Python
+model names the attribute `image_object_key`. This semantic reuse preserves the
+schema and existing rows, so no aesthetic rename migration is required.
 
 ## Migration
 
@@ -66,6 +69,6 @@ through the stricter v1 read schema.
 - Domain lifecycle methods and the read schema reject partial completed rows;
   the database remains nullable so queued rows and valuable legacy data survive
   migration without a destructive rewrite.
-- Local image storage and database-backed polling remain deployment and
-  reliability constraints. Multi-instance object storage, leases/retries, and
-  broader recovery belong to later reliability work.
+- The backend-independent image-storage contract supports a future
+  multi-instance object store, but provisioning that backend, leases/retries,
+  and broader recovery remain later reliability work.

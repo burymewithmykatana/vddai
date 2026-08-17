@@ -32,41 +32,40 @@ def create_prediction_job(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PredictionQueuedResponse:
-    stored_image = image_storage_service.save(image)
-
-    prediction = Prediction(
-        user_id=current_user.id,
-        image_path=stored_image.path,
-        image_format=stored_image.format,
-        image_width=stored_image.width,
-        image_height=stored_image.height,
-        status=PredictionStatus.QUEUED.value,
-    )
-
-    db.add(prediction)
+    stored_image = image_storage_service.store(image)
 
     try:
+        prediction = Prediction(
+            user_id=current_user.id,
+            image_object_key=stored_image.object_key,
+            image_format=stored_image.format,
+            image_width=stored_image.width,
+            image_height=stored_image.height,
+            status=PredictionStatus.QUEUED.value,
+        )
+        db.add(prediction)
         db.commit()
-        db.refresh(prediction)
     except Exception:
         db.rollback()
 
         try:
-            image_storage_service.delete(stored_image.path)
-        except OSError:
+            image_storage_service.delete(stored_image.object_key)
+        except Exception:
             logger.exception(
-                "failed_to_delete_orphaned_image image_path=%s",
-                stored_image.path,
+                "failed_to_delete_orphaned_image object_key=%s",
+                stored_image.object_key,
             )
 
         raise
 
+    db.refresh(prediction)
+
     logger.info(
         "prediction_job_created prediction_id=%s user_id=%s"
-        " image_path=%s image_format=%s image_width=%s image_height=%s",
+        " image_object_key=%s image_format=%s image_width=%s image_height=%s",
         prediction.id,
         prediction.user_id,
-        prediction.image_path,
+        prediction.image_object_key,
         prediction.image_format,
         prediction.image_width,
         prediction.image_height,

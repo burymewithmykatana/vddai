@@ -40,6 +40,7 @@ the host, change the database and Redis hosts to `localhost` as described in
 | Area | Implemented capability |
 |---|---|
 | API and security | FastAPI health routes, JWT authentication, active-user checks, owner-scoped uploads, result readback, and history |
+| Image storage | Opaque server-generated object keys, a backend-independent API/worker contract, and a traversal-safe local backend |
 | Data contract | Validated MVTec AD `tile` ingestion, deterministic splits and fingerprints, mask handling, and shared offline/online preprocessing |
 | Model baseline | Frozen ResNet-18 features, exact Euclidean nearest-neighbor scoring, and a validation-only frozen threshold |
 | Production inference | Fail-closed package loading, checksum and lineage validation, worker-side inference, lifecycle persistence, and safe failures |
@@ -89,7 +90,7 @@ ml/                      # Training and ML pipeline code
 docs/                    # Indexed product, architecture, engineering, ADR, review, and archive docs
 scripts/                 # Bootstrap, verification, documentation, and operational utilities
 artifacts/               # Generated model artifacts and metrics
-uploads/                 # Local development image storage
+uploads/                 # Default local image-object storage root
 Dockerfile               # API container definition
 docker-compose.yaml      # API, PostgreSQL, and Redis stack
 requirements.txt         # Pinned Python dependencies
@@ -117,6 +118,8 @@ JWT_SECRET_KEY=change-this-secret
 JWT_EXPIRE_MINUTES=60
 
 MAX_IMAGE_SIZE_MB=5
+IMAGE_STORAGE_BACKEND=local
+IMAGE_STORAGE_ROOT=uploads
 
 MODEL_IMAGE_WIDTH=224
 MODEL_IMAGE_HEIGHT=224
@@ -127,6 +130,12 @@ MODEL_ARTIFACT_ROOT=.
 ```
 
 Replace `JWT_SECRET_KEY` before running the application outside isolated local development. Never commit the real `.env` file.
+
+`IMAGE_STORAGE_BACKEND=local` selects the currently implemented backend and
+`IMAGE_STORAGE_ROOT` sets its development storage root. Predictions persist
+opaque keys such as `predictions/<uuid>.png`; neither API clients nor workers
+use that value as a host filesystem path. A shared object-store implementation
+is intentionally deferred.
 
 ## Local Development: API on the Host
 
@@ -323,7 +332,9 @@ Customer data collection must not block platform development. MVTec AD, beginnin
 
 ### Security boundary
 
-The authenticated server determines prediction ownership and image storage paths. Clients cannot select another user or provide arbitrary filesystem destinations.
+The authenticated server determines prediction ownership and opaque image
+object keys. Clients cannot select another user, storage key, or filesystem
+destination.
 
 ### Processing boundary
 
@@ -336,8 +347,10 @@ Existing database columns remain timezone-naive for compatibility. UTC timestamp
 ## Known Risks and Deferred Work
 
 - MIME type initially comes from client-provided multipart metadata.
-- Image storage is local and is not suitable for multi-instance deployment.
-- File deletion is not yet coupled to prediction-record deletion.
+- The configured image-storage implementation is local; multi-instance
+  deployment still requires a shared object-store implementation.
+- Object deletion is not yet coupled to prediction-record deletion, and no
+  automated retention scheduler is implemented.
 - The current credentials and secrets are development values.
 - Database polling is not a durable queue: job leases, retry policy, and crash
   recovery remain future reliability work.
@@ -769,8 +782,9 @@ then reuses that exact package for every later job in the worker process;
 requests never reload it. Serving never substitutes mock output, a default
 threshold, random weights, regenerated artifacts, or downloaded weights.
 
-For each claimed row, the worker reads only its server-controlled stored-image
-path, applies the shared EXIF/RGB/224x224 bilinear preprocessing contract,
+For each claimed row, the worker resolves its opaque server-controlled object
+key through the configured image-storage backend, reads the stored bytes,
+applies the shared EXIF/RGB/224x224 bilinear preprocessing contract,
 extracts one frozen ResNet-18 vector, computes the exact configured nearest-
 neighbor distance, and applies the package threshold. The former random mock
 and tabular model services are not part of the application or worker path.
@@ -810,7 +824,7 @@ are normalized to timezone-naive UTC for compatibility. The legacy
 only as `anomaly_score`.
 
 `GET /predictions/{id}` returns a single authorized result and safe image
-metadata without the internal server filesystem path.
+metadata without the object key or an internal backend location.
 `GET /predictions?limit=50&offset=0` returns newest-first history scoped to the
 current owner; administrators retain the existing cross-owner read privilege.
 PostgreSQL workers use row locking with `SKIP LOCKED` so concurrent workers do

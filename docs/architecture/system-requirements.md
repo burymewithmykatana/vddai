@@ -1,7 +1,7 @@
 # VDDAI System Requirements
 
 - Status: Current
-- Last reviewed: 2026-08-10
+- Last reviewed: 2026-08-17
 - Scope: v0.1 visual-inspection feasibility-pilot platform
 
 ## Product Boundary
@@ -16,7 +16,8 @@ public benchmark results.
 - Authenticate users with bearer JWTs and reject inactive users.
 - Accept size-limited JPEG, PNG, and WebP uploads after structural decoding and
   media-type validation.
-- Generate server-controlled storage paths and owner-scoped prediction records.
+- Generate opaque server-controlled image object keys and owner-scoped
+  prediction records.
 - Process predictions asynchronously through the database-backed worker queue.
 - Return prediction lifecycle state and safe completed-result fields.
 - Preserve prediction history and the exact model-package lineage used for each
@@ -28,6 +29,8 @@ public benchmark results.
 - Prevent ordinary users from accessing another user's predictions.
 - Keep internal paths, secrets, password hashes, stack traces, and private model
   artifacts out of public responses.
+- Resolve prediction image objects only through the configured storage backend;
+  never interpret request filenames or persisted keys as trusted host paths.
 - Preserve non-disclosing not-found behavior for unauthorized prediction reads.
 
 ## ML Integrity Requirements
@@ -48,6 +51,8 @@ public benchmark results.
 - Apply persistent schema changes through Alembic.
 - Keep transaction ownership explicit and roll back failed units of work.
 - Prevent concurrent workers from claiming the same queued row.
+- Retrieve claimed prediction inputs through the image-storage contract and
+  fail safely when an object is missing or unreadable.
 - Persist successful result fields atomically with the terminal lifecycle state.
 - Persist a safe terminal failure where recovery permits, while keeping internal
   diagnostics out of the public API.
@@ -64,6 +69,8 @@ public benchmark results.
 ## Operational Requirements
 
 - Support local development and the documented Docker Compose stack.
+- Provide a traversal-safe local image-storage backend while keeping API and
+  worker orchestration compatible with a future object-storage backend.
 - Validate dependencies, documentation structure, tests, and Compose wiring
   through the repository verification gate.
 - Keep generated datasets, feature banks, thresholds, evaluation runs, model
@@ -71,9 +78,10 @@ public benchmark results.
 
 ## Deferred Capabilities
 
-The v0.1 boundary does not promise multi-tenant isolation, distributed object
-storage, worker leases and retry orchestration, PLC integration, multi-camera
-lines, automated physical sorting, or safety/regulatory certification.
+The v0.1 boundary does not promise multi-tenant isolation, a provisioned
+distributed object-storage backend, automated image-retention scheduling,
+worker leases and retry orchestration, PLC integration, multi-camera lines,
+automated physical sorting, or safety/regulatory certification.
 
 ## Related Sources
 

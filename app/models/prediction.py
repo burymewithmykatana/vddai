@@ -32,7 +32,9 @@ class Prediction(Base):
         index=True,
     )
 
-    image_path: Mapped[str] = mapped_column(
+    # Keep the physical column name for compatibility; values are opaque keys.
+    image_object_key: Mapped[str] = mapped_column(
+        "image_path",
         String(500),
         nullable=False,
     )
