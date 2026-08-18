@@ -41,6 +41,28 @@ machine-readable document inventory is [`catalog.yaml`](catalog.yaml).
 
 ## Agent Workflow
 
+Use the repository roles in this human-controlled order:
+
+`approved task -> Planner -> human plan approval -> Coder -> Reviewer ->
+remediation and re-review when required -> QA -> Documentation -> human merge
+approval`
+
+- [`$vddai-plan`](../.agents/skills/vddai-plan/SKILL.md) turns an approved task
+  into an implementation-ready plan without changing the repository.
+- [`$vddai-code`](../.agents/skills/vddai-code/SKILL.md) implements only the
+  human-approved handoff or explicitly approved remediation.
+- [`$vddai-review`](../.agents/skills/vddai-review/SKILL.md) independently
+  reviews the exact implementation range and owns immutable review findings.
+- [`$vddai-qa`](../.agents/skills/vddai-qa/SKILL.md) independently verifies a
+  current reviewed subject and returns criterion-specific behavioral evidence.
+- [`$vddai-documentation`](../.agents/skills/vddai-documentation/SKILL.md)
+  synchronizes durable documentation only after eligible Reviewer evidence and
+  QA `PASS`, then leaves the proposed subject at the human merge gate.
+- Use [`$vddai-ml-change`](../.agents/skills/vddai-ml-change/SKILL.md) alongside
+  the applicable Planner or Coder role for ML, data, lineage, and artifact work.
+
+For every role:
+
 1. Read the root `AGENTS.md` and this index.
 2. Use `catalog.yaml` to locate the current documents for the task area.
 3. Read applicable ADRs before changing a durable boundary.
@@ -49,6 +71,10 @@ machine-readable document inventory is [`catalog.yaml`](catalog.yaml).
 5. Update the relevant document and catalog entry when a current contract or
    lifecycle status changes.
 6. Run `python scripts/validate_docs.py`, then the repository verification gate.
+
+Keep detailed technical truth in Git and repository documentation. Keep Notion
+to roadmap status, priorities, and concise milestone outcomes. Keep change
+history and review, CI, and merge evidence in GitHub pull requests and commits.
 
 ## Maintenance Rules
 

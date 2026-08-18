@@ -1,0 +1,4 @@
+interface:
+  display_name: "VDDAI Documentation"
+  short_description: "Synchronize verified VDDAI documentation"
+  default_prompt: "Use $vddai-documentation with current Reviewer and QA evidence to synchronize durable VDDAI documentation, validate the documentation-only delta, and return a standalone report."
