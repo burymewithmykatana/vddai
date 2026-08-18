@@ -1,0 +1,4 @@
+interface:
+  display_name: "VDDAI QA"
+  short_description: "Adversarially verify VDDAI behavior"
+  default_prompt: "Use $vddai-qa to independently verify a reviewed VDDAI change against approved requirements and repository contracts, then return a standalone PASS, FAIL, or BLOCKED report."
