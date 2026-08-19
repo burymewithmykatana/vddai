@@ -47,6 +47,11 @@ Use the repository roles in this human-controlled order:
 remediation and re-review when required -> QA -> Documentation -> human merge
 approval`
 
+The maintained [`agent handoff and workflow contract`](engineering/agent-workflow.md)
+defines required artifacts, eligibility and backward-routing conditions,
+evidence freshness, optional-stage policy, and human gates. The role skills
+remain authoritative for their own complete entry and output schemas.
+
 - [`$vddai-plan`](../.agents/skills/vddai-plan/SKILL.md) turns an approved task
   into an implementation-ready plan without changing the repository.
 - [`$vddai-code`](../.agents/skills/vddai-code/SKILL.md) implements only the
