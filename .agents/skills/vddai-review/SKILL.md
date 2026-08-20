@@ -31,6 +31,13 @@ If the report cannot be written, return the complete report in the task, state t
 
 If the intended base, task, or acceptance criteria cannot be determined from the repository or request, state the limitation. Do not invent requirements.
 
+A freshness-validated local Graphify graph may optionally cross-check changed
+component callers, dependents, and architecture impact. Treat it only as
+derived structural discovery: it cannot replace review of the exact diff,
+direct source, tests, configuration, migrations, or applicable contracts. If
+it is unavailable, stale, incomplete, or conflicts with direct evidence,
+report or disregard the limitation and continue the source-based review.
+
 ## Review in focused passes
 
 ### 1. Task compliance and scope

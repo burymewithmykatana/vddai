@@ -75,6 +75,13 @@ Use authority for its proper purpose:
 
 If the approved change contradicts a frozen executable contract or accepted ADR without explicit approved versioning or authority, return `BLOCKED` and cite the conflict. If sources are ambiguous or contradictory after reasonable inspection, do not choose a convenient expected result. Escalate to the Planner and human approver.
 
+A freshness-validated local Graphify graph may optionally help discover
+affected flows and candidate regression scope. It is derived structural
+evidence only: it cannot prove runtime behavior, establish an expected result,
+or satisfy an acceptance criterion. Verify selected scenarios against direct
+repository contracts and continue without Graphify when it is stale,
+unavailable, incomplete, or contradictory.
+
 ## Preserve role separation
 
 Keep these responsibilities distinct:

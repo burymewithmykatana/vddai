@@ -19,6 +19,11 @@ stop and report the conflict rather than silently selecting either one:
 Repository-wide agent rules remain in [`../AGENTS.md`](../AGENTS.md). The
 machine-readable document inventory is [`catalog.yaml`](catalog.yaml).
 
+Optional local Graphify structural discovery is governed by the maintained
+[`repository intelligence contract`](engineering/repository-intelligence.md).
+Its authority is purpose-specific, its generated output is not documentation,
+and all material conclusions require direct-source verification.
+
 ## Documentation Map
 
 | Area | Purpose | Start here |

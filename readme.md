@@ -21,6 +21,7 @@ detector tied to one product category.
 | Reproduce the data and model baseline | [MVTec AD dataset](#mvtec-ad-tile-dataset) and [Week 4 baseline](#week-4-complete) |
 | Understand image transformations | [Image preprocessing contract](#image-preprocessing-contract) |
 | Navigate product, architecture, and engineering documentation | [Documentation index](docs/README.md) |
+| Build or query local repository intelligence | [Graphify repository intelligence](docs/engineering/repository-intelligence.md) |
 | Review limitations before deployment | [Known risks and deferred work](#known-risks-and-deferred-work) |
 
 ### Before Running Real Inference
@@ -96,6 +97,25 @@ docker-compose.yaml      # API, PostgreSQL, and Redis stack
 requirements.txt         # Pinned Python dependencies
 .env.example             # Development configuration template
 ```
+
+## Optional Repository Intelligence
+
+Graphify `0.9.47` can generate local, code-only structural evidence without
+changing application dependencies or runtime behavior. Install it in an
+isolated tool environment, then use the tracked wrapper:
+
+```powershell
+uv tool install graphifyy==0.9.47
+graphify --version
+python scripts/graphify_repository.py build
+python scripts/graphify_repository.py validate
+python scripts/graphify_repository.py affected classify_anomaly_score --depth 3
+```
+
+Generated `graphify-out/` files are ignored and Docker-excluded. Queries fail
+closed when the graph is missing or stale. Graphify is optional derived
+structural evidence; verify conclusions against direct repository sources.
+See the full [repository intelligence contract](docs/engineering/repository-intelligence.md).
 
 ## Configuration
 

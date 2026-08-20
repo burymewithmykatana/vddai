@@ -40,6 +40,14 @@ If implementation is requested in the same task, finish the plan and stop for hu
 
 Do not invent requirements, affected components, current behavior, or verification evidence. Cite repository-relative paths and named symbols, endpoints, tables, contracts, or tests when they make the plan actionable.
 
+When a freshness-validated local Graphify graph is available, it may be used
+as optional derived evidence for dependency, ownership, path, and blast-radius
+discovery. Confirm every planning conclusion against the relevant source,
+tests, configuration, migrations, ADRs, or current documentation. If the graph
+is stale, unavailable, incomplete, or contradictory, identify that limitation
+and continue with direct repository inspection; never make Graphify a
+prerequisite for planning.
+
 ## Classify decisions before escalating
 
 Reduce uncertainty before the Coder begins. A successful plan should normally leave implementation work, not architectural discovery. Classify each unclear or undecided matter into one of the following categories.

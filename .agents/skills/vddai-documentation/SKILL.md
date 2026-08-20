@@ -135,6 +135,13 @@ Preserve these source-of-truth boundaries exactly:
 
 Never turn Notion into a duplicate technical wiki.
 
+Graphify outputs are generated local evidence, not maintained documentation.
+Never manually edit, curate, catalog, or copy `graphify-out/` content into
+durable documents. Regenerate it only through
+`scripts/graphify_repository.py`; use direct repository evidence to maintain
+semantic architecture and engineering descriptions. Documentation work must
+remain correct when Graphify is absent or stale.
+
 ## Route each documentation fact once
 
 Apply this deterministic routing policy and avoid duplicate technical truth:

@@ -41,3 +41,6 @@ data/metadata/*.generated.json
 data/metadata/*.generated.csv
 
 .pytest_tmp/
+
+# Generated local Graphify repository intelligence
+graphify-out/
