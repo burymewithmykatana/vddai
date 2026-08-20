@@ -114,6 +114,26 @@ frameworks, abstractions, or services unless they solve a concrete v0.1.0
 requirement. Do not split the application into microservices before v0.1.0
 without an approved architecture decision.
 
+## Repository Intelligence
+
+Graphify is optional, local, generated repository intelligence for structural
+discovery. Its authority is purpose-specific: a fresh Graphify graph may help
+locate dependencies, callers, paths, and affected components, but it does not
+define requirements, executable behavior, architecture decisions, role
+responsibilities, workflow gates, or approval authority. Verify every material
+Graphify conclusion against direct repository sources before acting on it.
+
+Use only a graph that passes `python scripts/graphify_repository.py validate`
+for the exact current HEAD and working-tree fingerprint. If Graphify is absent,
+invalid, stale, incomplete, or conflicts with direct repository evidence, say
+so and fall back to direct repository inspection. Graphify is never required
+for correctness, review, QA, documentation, or task completion.
+
+Do not manually edit `graphify-out/`, commit its generated contents, install
+Graphify-generated agent instructions, enable Graphify hooks or watchers, or
+create a shared Graphify service. Repository agents must not depend on
+Graphify-generated agent instructions for their operating contract.
+
 ## Engineering Principles
 
 In order of priority, prefer:

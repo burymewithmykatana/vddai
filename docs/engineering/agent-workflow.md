@@ -62,6 +62,14 @@ For ML, data, lineage, or artifact changes, apply
 applicable Planner or Coder role. It is a domain-safety companion, not a new
 lifecycle stage.
 
+Graphify repository intelligence is optional derived structural evidence
+within an owning role, not a lifecycle stage, handoff artifact, verdict, or
+approval. A role may use only a freshness-validated local graph and must verify
+material conclusions against the direct sources authoritative for that
+conclusion's purpose. Stale or unavailable Graphify evidence never blocks the
+workflow; the role falls back to direct repository inspection. See
+[`repository-intelligence.md`](repository-intelligence.md).
+
 ## Handoff Artifacts
 
 The owning role skill remains authoritative for each artifact's full schema.

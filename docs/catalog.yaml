@@ -36,6 +36,10 @@ documents:
     area: engineering
     kind: agent-workflow
     status: current
+  - path: docs/engineering/repository-intelligence.md
+    area: engineering
+    kind: repository-intelligence
+    status: current
   - path: docs/decisions/0001-product-and-data-strategy.md
     area: decisions
     kind: architecture-decision
