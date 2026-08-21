@@ -112,6 +112,23 @@ class Prediction(Base):
         nullable=True,
     )
 
+    attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
+
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime,
         nullable=True,
@@ -160,6 +177,22 @@ class Prediction(Base):
             raise ValueError("latency_ms must be a non-negative integer.")
         return value
 
+    @validates("attempt_count")
+    def validate_attempt_count(self, key: str, value: int) -> int:
+        if isinstance(value, bool) or value < 0:
+            raise ValueError("attempt_count must be a non-negative integer.")
+        return value
+
+    @validates("processing_started_at", "lease_expires_at", "next_attempt_at")
+    def validate_lifecycle_timestamp_column(
+        self,
+        key: str,
+        value: datetime | None,
+    ) -> datetime | None:
+        if value is not None:
+            self._validate_lifecycle_timestamp(value, field=key)
+        return value
+
     @staticmethod
     def _validate_lifecycle_timestamp(value: datetime, *, field: str) -> None:
         if value.tzinfo is not None:
@@ -174,31 +207,117 @@ class Prediction(Base):
         self.model_lineage = None
         self.latency_ms = None
 
-    def start_processing(self, *, at: datetime) -> None:
-        if self.status != PredictionStatus.QUEUED.value:
-            raise ValueError("Only queued predictions can start processing.")
+    def _require_current_processing_attempt(self, *, expected_attempt: int) -> None:
+        if (
+            self.status != PredictionStatus.PROCESSING.value
+            or self.processing_started_at is None
+        ):
+            raise ValueError("A timestamped processing prediction is required.")
+        if self.attempt_count != expected_attempt:
+            raise ValueError("Prediction attempt token is stale.")
+        if self.next_attempt_at is not None:
+            raise ValueError("A retry-waiting prediction has no active attempt.")
+
+    def start_processing(
+        self,
+        *,
+        at: datetime,
+        lease_expires_at: datetime,
+    ) -> int:
+        if self.attempt_count is None:
+            self.attempt_count = 0
+        is_initial_attempt = self.status == PredictionStatus.QUEUED.value
+        is_due_retry = (
+            self.status == PredictionStatus.PROCESSING.value
+            and self.processing_started_at is not None
+            and self.lease_expires_at is None
+            and self.next_attempt_at is not None
+            and at >= self.next_attempt_at
+        )
+        if not is_initial_attempt and not is_due_retry:
+            raise ValueError("Prediction is not eligible to start an attempt.")
         self._validate_lifecycle_timestamp(at, field="processing_started_at")
+        self._validate_lifecycle_timestamp(
+            lease_expires_at,
+            field="lease_expires_at",
+        )
         if self.created_at is not None and at < self.created_at:
             raise ValueError("processing_started_at cannot precede created_at.")
+        if lease_expires_at <= at:
+            raise ValueError("lease_expires_at must follow the attempt start.")
+        if is_initial_attempt:
+            if self.attempt_count != 0:
+                raise ValueError("Queued predictions cannot have prior attempts.")
+            self.processing_started_at = at
         self.clear_inference_result()
         self.status = PredictionStatus.PROCESSING.value
-        self.processing_started_at = at
+        self.attempt_count += 1
+        self.lease_expires_at = lease_expires_at
+        self.next_attempt_at = None
         self.completed_at = None
         self.error_message = None
+        return self.attempt_count
 
-    def complete(
+    def schedule_retry(
         self,
-        result: AnomalyInferenceResult,
         *,
+        expected_attempt: int,
+        error_message: str,
+        next_attempt_at: datetime,
+    ) -> None:
+        self._require_current_processing_attempt(expected_attempt=expected_attempt)
+        if not error_message.strip():
+            raise ValueError("Retrying predictions require an internal diagnostic.")
+        self._validate_lifecycle_timestamp(
+            next_attempt_at,
+            field="next_attempt_at",
+        )
+        if next_attempt_at < self.processing_started_at:
+            raise ValueError("next_attempt_at cannot precede processing_started_at.")
+        self.clear_inference_result()
+        self.lease_expires_at = None
+        self.next_attempt_at = next_attempt_at
+        self.completed_at = None
+        self.error_message = error_message
+
+    def fail_retry_waiting(
+        self,
+        *,
+        expected_attempt: int,
+        error_message: str,
         at: datetime,
     ) -> None:
         if (
             self.status != PredictionStatus.PROCESSING.value
             or self.processing_started_at is None
+            or self.lease_expires_at is not None
+            or self.next_attempt_at is None
         ):
-            raise ValueError(
-                "Only a timestamped processing prediction can be completed."
-            )
+            raise ValueError("A retry-waiting prediction is required.")
+        if self.attempt_count != expected_attempt:
+            raise ValueError("Prediction attempt token is stale.")
+        if not error_message.strip():
+            raise ValueError("Failed predictions require an internal diagnostic.")
+        self._validate_lifecycle_timestamp(at, field="completed_at")
+        if at < self.processing_started_at:
+            raise ValueError("completed_at cannot precede processing_started_at.")
+        self.clear_inference_result()
+        self.status = PredictionStatus.FAILED.value
+        self.lease_expires_at = None
+        self.next_attempt_at = None
+        self.error_message = error_message
+        self.completed_at = at
+
+    def complete(
+        self,
+        result: AnomalyInferenceResult,
+        *,
+        expected_attempt: int,
+        at: datetime,
+    ) -> None:
+        self._require_current_processing_attempt(expected_attempt=expected_attempt)
+        if self.lease_expires_at is None:
+            raise ValueError("Completed predictions require an active attempt lease.")
         self._validate_lifecycle_timestamp(at, field="completed_at")
         if at < self.processing_started_at:
             raise ValueError("completed_at cannot precede processing_started_at.")
@@ -210,15 +329,19 @@ class Prediction(Base):
         self.model_lineage = result.lineage_for_persistence()
         self.latency_ms = result.latency_ms
         self.status = PredictionStatus.COMPLETED.value
+        self.lease_expires_at = None
+        self.next_attempt_at = None
         self.completed_at = at
         self.error_message = None
 
-    def fail(self, *, error_message: str, at: datetime) -> None:
-        if (
-            self.status != PredictionStatus.PROCESSING.value
-            or self.processing_started_at is None
-        ):
-            raise ValueError("Only a timestamped processing prediction can fail.")
+    def fail(
+        self,
+        *,
+        expected_attempt: int,
+        error_message: str,
+        at: datetime,
+    ) -> None:
+        self._require_current_processing_attempt(expected_attempt=expected_attempt)
         if not error_message.strip():
             raise ValueError("Failed predictions require an internal diagnostic.")
         self._validate_lifecycle_timestamp(at, field="completed_at")
@@ -226,6 +349,8 @@ class Prediction(Base):
             raise ValueError("completed_at cannot precede processing_started_at.")
         self.clear_inference_result()
         self.status = PredictionStatus.FAILED.value
+        self.lease_expires_at = None
+        self.next_attempt_at = None
         self.error_message = error_message
         self.completed_at = at
 

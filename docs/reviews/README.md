@@ -14,6 +14,11 @@ The current series documents the A1-A10 agent-readiness migration:
 6. [`2026-08-10-agent-readiness-a1-a10-r3-remediation.md`](2026-08-10-agent-readiness-a1-a10-r3-remediation.md)
 7. [`2026-08-10-agent-readiness-a1-a10-r4.md`](2026-08-10-agent-readiness-a1-a10-r4.md)
 
+The W7D2 prediction-reliability review series is:
+
+1. [`2026-08-20-w7d2-prediction-reliability.md`](2026-08-20-w7d2-prediction-reliability.md)
+2. [`2026-08-21-w7d2-prediction-reliability-r2.md`](2026-08-21-w7d2-prediction-reliability-r2.md)
+
 For a new task, create a new dated report series with the task slug. Never edit
 an earlier report to make a later result appear cleaner; add remediation and
 re-review evidence.

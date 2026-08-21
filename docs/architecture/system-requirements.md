@@ -1,7 +1,7 @@
 # VDDAI System Requirements
 
 - Status: Current
-- Last reviewed: 2026-08-17
+- Last reviewed: 2026-08-21
 - Scope: v0.1 visual-inspection feasibility-pilot platform
 
 ## Product Boundary
@@ -19,6 +19,8 @@ public benchmark results.
 - Generate opaque server-controlled image object keys and owner-scoped
   prediction records.
 - Process predictions asynchronously through the database-backed worker queue.
+- Treat every accepted prediction submission as a distinct job while making
+  execution of each persisted job replay-safe.
 - Return prediction lifecycle state and safe completed-result fields.
 - Preserve prediction history and the exact model-package lineage used for each
   successful result.
@@ -51,6 +53,12 @@ public benchmark results.
 - Apply persistent schema changes through Alembic.
 - Keep transaction ownership explicit and roll back failed units of work.
 - Prevent concurrent workers from claiming the same queued row.
+- Commit a bounded lease and monotonically increasing attempt token before
+  inference, without holding a database transaction during inference.
+- Recover expired or legacy lease-less processing work after worker restart and
+  enforce a finite, positive, bounded retry policy.
+- Permit at-least-once computation while allowing only the current attempt to
+  persist an authoritative terminal transition.
 - Retrieve claimed prediction inputs through the image-storage contract and
   fail safely when an object is missing or unreadable.
 - Persist successful result fields atomically with the terminal lifecycle state.
@@ -80,12 +88,14 @@ public benchmark results.
 
 The v0.1 boundary does not promise multi-tenant isolation, a provisioned
 distributed object-storage backend, automated image-retention scheduling,
-worker leases and retry orchestration, PLC integration, multi-camera lines,
-automated physical sorting, or safety/regulatory certification.
+lease heartbeats, an append-only attempt ledger, an external queue or workflow
+engine, PLC integration, multi-camera lines, automated physical sorting, or
+safety/regulatory certification.
 
 ## Related Sources
 
 - [`../decisions/README.md`](../decisions/README.md)
+- [`../decisions/0010-database-backed-prediction-reliability.md`](../decisions/0010-database-backed-prediction-reliability.md)
 - [`../engineering/data-lineage.md`](../engineering/data-lineage.md)
 - [`../product/product-definition.md`](../product/product-definition.md)
 - [`../../AGENTS.md`](../../AGENTS.md)

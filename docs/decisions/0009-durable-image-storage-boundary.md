@@ -1,6 +1,6 @@
 # ADR 0009 — Durable Prediction-Image Storage Boundary
 
-- Status: Accepted
+- Status: Accepted; worker read failure policy amended by ADR 0010
 - Date: 2026-08-17
 
 ## Context
@@ -58,7 +58,8 @@ automatic garbage collector; platform operations owns intentional deletion.
 |---|---|
 | Storage write fails | Return the existing safe upload-storage error and create no prediction row. |
 | Database commit fails after storage | Roll back, attempt `delete(object_key)`, log cleanup failure, and re-raise the original database error. |
-| Worker read finds a missing or unreadable object | Preserve the normal claim transaction, then persist the stable safe `inference_failed` terminal state where recovery permits. |
+| Worker read finds a missing object or invalid key | Preserve the committed claim, then persist the stable safe `inference_failed` terminal state where recovery permits. |
+| Worker read encounters another storage-backend error | Apply ADR 0010's bounded retry policy, then persist the stable safe terminal failure if attempts are exhausted. |
 | Deletion targets an absent object | Return `false`; repeated deletion remains safe. |
 | Prediction reaches a terminal state | Retain the input object until an explicit retention or record-deletion operation owns removal. |
 
