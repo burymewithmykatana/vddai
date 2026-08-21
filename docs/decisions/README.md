@@ -13,7 +13,8 @@ their status or an amendment explicitly says otherwise.
 | [`0006`](0006-queryable-experiment-ledger.md) | Accepted | Queryable local experiment ledger |
 | [`0007`](0007-controlled-model-registry.md) | Accepted | Controlled local model registry |
 | [`0008`](0008-registry-selected-production-package.md) | Accepted | Registry-selected production package |
-| [`0009`](0009-durable-image-storage-boundary.md) | Accepted | Durable prediction-image storage boundary |
+| [`0009`](0009-durable-image-storage-boundary.md) | Accepted; amended | Durable prediction-image storage boundary |
+| [`0010`](0010-database-backed-prediction-reliability.md) | Accepted | Database-backed prediction reliability |
 
 Create the next zero-padded number for a new decision. Preserve historical
 context, record consequences, and mark replaced decisions as superseded rather

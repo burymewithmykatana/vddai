@@ -262,10 +262,13 @@ def test_prediction_domain_atomically_completes_full_result() -> None:
     completed_at = processing_started_at + timedelta(milliseconds=8)
 
     with pytest.raises(ValueError, match="timestamped processing"):
-        prediction.complete(result, at=completed_at)
+        prediction.complete(result, expected_attempt=1, at=completed_at)
 
-    prediction.start_processing(at=processing_started_at)
-    prediction.complete(result, at=completed_at)
+    attempt = prediction.start_processing(
+        at=processing_started_at,
+        lease_expires_at=processing_started_at + timedelta(minutes=5),
+    )
+    prediction.complete(result, expected_attempt=attempt, at=completed_at)
 
     assert prediction.status == PredictionStatus.COMPLETED.value
     assert prediction.predicted_label == PredictionLabel.NORMAL.value
@@ -298,8 +301,12 @@ def test_prediction_domain_failure_clears_stale_result() -> None:
     )
     processing_started_at = created_at + timedelta(seconds=1)
 
-    prediction.start_processing(at=processing_started_at)
+    attempt = prediction.start_processing(
+        at=processing_started_at,
+        lease_expires_at=processing_started_at + timedelta(minutes=5),
+    )
     prediction.fail(
+        expected_attempt=attempt,
         error_message="RuntimeError: safe internal diagnostic",
         at=processing_started_at + timedelta(seconds=1),
     )
@@ -335,4 +342,8 @@ def test_prediction_domain_rejects_invalid_values_and_aware_timestamps() -> None
     prediction.status = PredictionStatus.QUEUED
     prediction.created_at = datetime(2026, 8, 3, 12, 0, 0)
     with pytest.raises(ValueError, match="timezone-naive UTC"):
-        prediction.start_processing(at=datetime.now(UTC))
+        aware_start = datetime.now(UTC)
+        prediction.start_processing(
+            at=aware_start,
+            lease_expires_at=aware_start + timedelta(minutes=5),
+        )

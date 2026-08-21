@@ -1,5 +1,6 @@
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +22,17 @@ class Settings(BaseSettings):
     MODEL_IMAGE_HEIGHT: int = 224
     MODEL_DEVICE: str = "cpu"
     WORKER_POLL_INTERVAL_SECONDS: float = 1.0
+    WORKER_MAX_ATTEMPTS: int = Field(default=3, ge=1)
+    WORKER_RETRY_DELAY_SECONDS: float = Field(
+        default=5.0,
+        gt=0,
+        allow_inf_nan=False,
+    )
+    WORKER_ATTEMPT_LEASE_SECONDS: float = Field(
+        default=300.0,
+        gt=0,
+        allow_inf_nan=False,
+    )
     MODEL_REGISTRY_PATH: str = "artifacts/registry/model_registry.sqlite3"
     MODEL_ARTIFACT_ROOT: str = "."
     # Accepted only so older local .env files remain readable; serving ignores them.

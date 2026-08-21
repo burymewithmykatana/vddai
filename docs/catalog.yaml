@@ -76,3 +76,7 @@ documents:
     area: decisions
     kind: architecture-decision
     status: accepted
+  - path: docs/decisions/0010-database-backed-prediction-reliability.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted

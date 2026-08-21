@@ -4,10 +4,11 @@ Production-oriented backend for authenticated, asynchronous visual anomaly
 detection. VDDAI is designed as a reusable pilot platform rather than a
 detector tied to one product category.
 
-> **Status:** Week 5 production inference is complete. An authenticated upload
-> can be processed by the frozen MVTec AD `tile` package and persisted with its
-> score, decision threshold, label, latency, and full model lineage. The next
-> milestone is experiment tracking and controlled model promotion.
+> **Status:** Registry-selected production inference and W7D2 prediction
+> reliability are complete in the proposed v0.1.0 working tree. Authenticated
+> prediction jobs use bounded retries, attempt leases, stale-work recovery, and
+> fenced terminal persistence while preserving the frozen MVTec AD `tile`
+> inference and public API contracts.
 
 ## Start Here
 
@@ -16,6 +17,7 @@ detector tied to one product category.
 | Run the API on my machine | [Local development](#local-development-api-on-the-host) |
 | Run the complete stack | [Docker development](#docker-development-all-services) |
 | Configure the real model package | [Configuration](#configuration) and [Week 5 production inference](#week-5-production-inference) |
+| Understand prediction retries and recovery | [Prediction reliability and recovery](#prediction-reliability-and-recovery) and [ADR 0010](docs/decisions/0010-database-backed-prediction-reliability.md) |
 | Prove the complete inference flow | [W6D1 inference gate](#w6d1-reproducible-real-inference-gate) |
 | Track and query the Week 4 baseline | [Week 6 experiment tracking](#week-6-experiment-tracking) |
 | Reproduce the data and model baseline | [MVTec AD dataset](#mvtec-ad-tile-dataset) and [Week 4 baseline](#week-4-complete) |
@@ -44,8 +46,8 @@ the host, change the database and Redis hosts to `localhost` as described in
 | Image storage | Opaque server-generated object keys, a backend-independent API/worker contract, and a traversal-safe local backend |
 | Data contract | Validated MVTec AD `tile` ingestion, deterministic splits and fingerprints, mask handling, and shared offline/online preprocessing |
 | Model baseline | Frozen ResNet-18 features, exact Euclidean nearest-neighbor scoring, and a validation-only frozen threshold |
-| Production inference | Fail-closed package loading, checksum and lineage validation, worker-side inference, lifecycle persistence, and safe failures |
-| Verification | 208 automated tests plus a PostgreSQL 16 upgrade/downgrade check for the Week 5 migrations |
+| Production inference | Fail-closed package loading, checksum and lineage validation, worker-side inference, bounded retries, lease recovery, fenced lifecycle persistence, and safe failures |
+| Verification | Canonical gate with 297 passing tests and 2 optional PostgreSQL tests, plus PostgreSQL 16 concurrency, restart-recovery, and migration QA |
 
 ## Project Goal
 
@@ -145,6 +147,9 @@ MODEL_IMAGE_WIDTH=224
 MODEL_IMAGE_HEIGHT=224
 MODEL_DEVICE=cpu
 WORKER_POLL_INTERVAL_SECONDS=1.0
+WORKER_MAX_ATTEMPTS=3
+WORKER_RETRY_DELAY_SECONDS=5.0
+WORKER_ATTEMPT_LEASE_SECONDS=300.0
 MODEL_REGISTRY_PATH=artifacts/registry/model_registry.sqlite3
 MODEL_ARTIFACT_ROOT=.
 ```
@@ -156,6 +161,14 @@ Replace `JWT_SECRET_KEY` before running the application outside isolated local d
 opaque keys such as `predictions/<uuid>.png`; neither API clients nor workers
 use that value as a host filesystem path. A shared object-store implementation
 is intentionally deferred.
+
+`WORKER_MAX_ATTEMPTS` counts the initial attempt and every retry.
+`WORKER_RETRY_DELAY_SECONDS` is the fixed delay before a retry becomes
+eligible, and `WORKER_ATTEMPT_LEASE_SECONDS` bounds one worker attempt. All
+three values are process configuration; timing values must be finite and
+positive, and the maximum must be a positive integer. Set the lease above the
+expected worst-case inference duration so live work is not needlessly
+reclaimed.
 
 ## Local Development: API on the Host
 
@@ -358,7 +371,9 @@ destination.
 
 ### Processing boundary
 
-Real decoding and deterministic preprocessing are implemented before expanding background-job infrastructure. Queue complexity will be added only after the image-to-model boundary is measurable and testable.
+Real decoding and deterministic preprocessing preceded background-job
+reliability. The current queue remains PostgreSQL-backed and now adds bounded
+retries, leases, recovery, and attempt fencing without another queue service.
 
 ### Time representation
 
@@ -372,8 +387,10 @@ Existing database columns remain timezone-naive for compatibility. UTC timestamp
 - Object deletion is not yet coupled to prediction-record deletion, and no
   automated retention scheduler is implemented.
 - The current credentials and secrets are development values.
-- Database polling is not a durable queue: job leases, retry policy, and crash
-  recovery remain future reliability work.
+- Database polling remains intentionally simple: there is no lease heartbeat,
+  append-only attempt ledger, or external queue orchestrator. Work that exceeds
+  its configured lease may be computed again, while attempt fencing prevents a
+  stale worker from overwriting the authoritative result.
 - Operational metrics, tracing, and production alerting are not yet implemented.
 
 ## Week 3 Handoff
@@ -812,11 +829,12 @@ and tabular model services are not part of the application or worker path.
 `latency_ms` uses `time.perf_counter()` and measures from immediately before
 stored-image decoding through preprocessing, feature extraction, scoring, and
 the final label decision. Queue wait time, package initialization, and database
-commits are excluded. The worker clears stale result/error fields on transition
-to processing and writes the completed result atomically. On inference or
-result-persistence failure it rolls back the session, records a clean failed
-state when the transaction remains usable, and keeps detailed diagnostics
-internal; the authenticated API exposes only `inference_failed`.
+commits are excluded. The worker clears stale result/error fields when an
+attempt starts and writes the completed result atomically. Retryable failures
+return the job to an internal waiting substate; terminal or exhausted failures
+clear result data and persist a clean failed state. Detailed diagnostics remain
+internal, while the authenticated API exposes only `inference_failed` for a
+terminal failure.
 
 The worker loads pretrained weights only from the local torch cache. Provision
 the exact `IMAGENET1K_V1` ResNet-18 checkpoint and the configured generated
@@ -848,13 +866,71 @@ metadata without the object key or an internal backend location.
 `GET /predictions?limit=50&offset=0` returns newest-first history scoped to the
 current owner; administrators retain the existing cross-owner read privilege.
 PostgreSQL workers use row locking with `SKIP LOCKED` so concurrent workers do
-not claim the same queued row.
+not claim the same eligible row.
 
-Apply the W5D4 lifecycle migration with `alembic upgrade head`. Revision
-`20260803_02` adds the nullable processing-start timestamp without rewriting
-legacy rows; `alembic downgrade 20260801_01` reverses only that revision. See
-`docs/decisions/0005-inference-result-persistence.md` for the field mapping,
-migration behavior, and legacy-data caveat.
+### Prediction Reliability and Recovery
+
+Every accepted `POST /predictions` creates a distinct prediction job. The API
+does not deduplicate equal image bytes or filenames and does not define an
+idempotency-key header in v0.1.0. Idempotency applies to execution of one
+persisted job: computation may occur more than once after a lease expires, but
+only the current attempt token may persist an authoritative result or failure.
+
+The public lifecycle remains `queued -> processing -> completed|failed`, with
+`needs_review` retaining its existing successful-result semantics. Retry wait
+is internal: clients continue to see `processing`, no result fields, and no
+failure code. The database stores `attempt_count`, `lease_expires_at`, and
+`next_attempt_at`; these fields and internal diagnostics are not public API
+members.
+
+The worker performs these transactionally separate steps:
+
+1. recover at most one expired or legacy lease-less active row;
+2. lock the oldest queued or due-retry row with `FOR UPDATE SKIP LOCKED`;
+3. increment its attempt token, assign a lease, and commit the claim;
+4. read storage and run inference without holding a database transaction; and
+5. relock the row and persist only when status and attempt token are current.
+
+An interruption before claim commit leaves the job eligible. An interruption
+after commit, during inference, or before terminal persistence leaves a leased
+`processing` job that another worker recovers after expiry. An old worker may
+finish computing, but its stale token cannot overwrite a replacement attempt.
+Terminal rows are never selected again.
+
+Generic storage-backend read failures, result-commit failures, and expired
+leases are retried up to `WORKER_MAX_ATTEMPTS`. Missing stored objects, invalid
+object keys, preprocessing errors, promoted-model resolution or package
+failures, post-claim lifecycle validation errors, and unknown execution errors
+are terminal. Retry exhaustion is terminal. The stable public failure code
+remains `inference_failed`; inspect worker logs and the internal database
+diagnostic for operator detail.
+
+Apply migrations before starting the new worker code:
+
+```powershell
+alembic upgrade head
+```
+
+Revision `20260820_03` adds non-null `attempt_count` with default `0` plus
+nullable `lease_expires_at` and `next_attempt_at`, preserving existing rows.
+Legacy `processing` rows without a lease are treated as stale and enter bounded
+recovery. Stop old workers before applying the migration and do not run old and
+new worker versions concurrently; old workers do not participate in attempt
+fencing.
+
+For a code rollback, first stop every worker and confirm no `processing` row
+depends on retry or lease metadata. Then downgrade only this revision and
+deploy the matching older worker:
+
+```powershell
+alembic downgrade 20260803_02
+```
+
+The downgrade preserves prediction rows and prior result fields but removes
+the three W7D2 metadata columns. Removing them while retry-waiting or leased
+work exists discards its recovery metadata. See
+[ADR 0010](docs/decisions/0010-database-backed-prediction-reliability.md) for
+the durable state-machine, failure-classification, and compatibility decision.
 
 ### PostgreSQL 16 migration verification
 
@@ -871,6 +947,13 @@ nullable without defaults, added nullable `anomaly_score`, `model_lineage`, and
 columns were removed, the non-null `0.75` and `mock-v0` defaults were restored,
 and the legacy values remained unchanged. The disposable verification database
 was removed after the check.
+
+On 21 August 2026, W7D2 QA also verified revision `20260820_03` on a disposable
+PostgreSQL 16 database. A legacy `processing` row retained its status,
+threshold, package ID, and internal diagnostic; upgrade initialized
+`attempt_count=0` with null lease/retry timestamps. Targeted downgrade removed
+only the three W7D2 columns, re-upgrade succeeded, and the disposable database
+was removed.
 
 Week 5 exits when an authenticated upload can be queued, processed by the
 frozen Week 4 model package, persisted with the exact score/threshold/label and

@@ -278,6 +278,43 @@ def test_create_prediction_job(
     assert object_store.read(prediction.image_object_key) == image_contents
 
 
+def test_repeated_prediction_posts_create_distinct_jobs(
+    client: TestClient,
+    db: Session,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configure_local_image_storage(monkeypatch, tmp_path / "objects")
+    image_contents = create_image_bytes("PNG")
+
+    first = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(
+            content=image_contents,
+            filename="replayed.png",
+            content_type="image/png",
+        ),
+    )
+    second = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(
+            content=image_contents,
+            filename="replayed.png",
+            content_type="image/png",
+        ),
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["prediction_id"] != second.json()["prediction_id"]
+    predictions = db.query(Prediction).order_by(Prediction.id.asc()).all()
+    assert len(predictions) == 2
+    assert predictions[0].image_object_key != predictions[1].image_object_key
+
+
 def test_create_prediction_commit_failure_removes_orphaned_upload(
     client: TestClient,
     db: Session,
@@ -670,10 +707,7 @@ def test_worker_persists_failure(
 
 @pytest.mark.parametrize(
     "storage_error",
-    [
-        StoredImageNotFoundError("stored object missing"),
-        ImageStorageError("stored object unreadable"),
-    ],
+    [StoredImageNotFoundError("stored object missing")],
 )
 def test_worker_storage_read_failure_becomes_safe_terminal_failure(
     db: Session,
@@ -713,7 +747,54 @@ def test_worker_storage_read_failure_becomes_safe_terminal_failure(
     assert read_keys == [prediction.image_object_key]
 
 
-def test_result_commit_failure_rolls_back_and_session_processes_next_job(
+def test_worker_transient_storage_failure_waits_for_retry_without_public_details(
+    client: TestClient,
+    db: Session,
+    test_user: User,
+) -> None:
+    prediction = create_queued_prediction(db, test_user.id)
+
+    class TransientlyUnavailableStorage:
+        def read(self, object_key: str) -> bytes:
+            raise ImageStorageError("temporary backend outage")
+
+    class UnexpectedInferenceService:
+        def predict(self, image_contents: bytes) -> AnomalyInferenceResult:
+            raise AssertionError("Inference must not run after storage read failure")
+
+    assert (
+        process_next_prediction(
+            db,
+            inference_service=UnexpectedInferenceService(),
+            storage_service=TransientlyUnavailableStorage(),
+        )
+        is False
+    )
+    db.expire_all()
+    retry_waiting = db.get(Prediction, prediction.id)
+    assert retry_waiting is not None
+    assert retry_waiting.status == PredictionStatus.PROCESSING.value
+    assert retry_waiting.failure_code is None
+    assert retry_waiting.lease_expires_at is None
+    assert retry_waiting.next_attempt_at is not None
+    assert retry_waiting.error_message.startswith("ImageStorageError:")
+
+    token = create_access_token(subject=test_user.id)
+    response = client.get(
+        f"/predictions/{prediction.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    public_result = response.json()
+    assert public_result["status"] == PredictionStatus.PROCESSING.value
+    assert public_result["failure_code"] is None
+    assert "error_message" not in public_result
+    assert "attempt_count" not in public_result
+    assert "lease_expires_at" not in public_result
+    assert "next_attempt_at" not in public_result
+
+
+def test_result_commit_failure_schedules_retry_and_session_processes_next_job(
     db: Session,
     test_user: User,
     monkeypatch: pytest.MonkeyPatch,
@@ -757,16 +838,18 @@ def test_result_commit_failure_rolls_back_and_session_processes_next_job(
 
     assert first_processed is False
     db.expire_all()
-    failed = db.get(Prediction, first.id)
-    assert failed is not None
-    assert failed.status == PredictionStatus.FAILED.value
-    assert failed.predicted_label is None
-    assert failed.anomaly_score is None
-    assert failed.model_lineage is None
-    assert failed.processing_started_at is not None
-    assert failed.completed_at is not None
-    assert failed.error_message is not None
-    assert failed.error_message.startswith("SQLAlchemyError:")
+    retry_waiting = db.get(Prediction, first.id)
+    assert retry_waiting is not None
+    assert retry_waiting.status == PredictionStatus.PROCESSING.value
+    assert retry_waiting.predicted_label is None
+    assert retry_waiting.anomaly_score is None
+    assert retry_waiting.model_lineage is None
+    assert retry_waiting.processing_started_at is not None
+    assert retry_waiting.completed_at is None
+    assert retry_waiting.lease_expires_at is None
+    assert retry_waiting.next_attempt_at is not None
+    assert retry_waiting.error_message is not None
+    assert retry_waiting.error_message.startswith("SQLAlchemyError:")
 
     second_processed = process_next_prediction(
         db,
