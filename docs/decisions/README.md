@@ -15,6 +15,7 @@ their status or an amendment explicitly says otherwise.
 | [`0008`](0008-registry-selected-production-package.md) | Accepted | Registry-selected production package |
 | [`0009`](0009-durable-image-storage-boundary.md) | Accepted; amended | Durable prediction-image storage boundary |
 | [`0010`](0010-database-backed-prediction-reliability.md) | Accepted | Database-backed prediction reliability |
+| [`0011`](0011-database-backed-prediction-admission.md) | Accepted | Database-backed prediction admission and resource guardrails |
 
 Create the next zero-padded number for a new decision. Preserve historical
 context, record consequences, and mark replaced decisions as superseded rather

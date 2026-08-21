@@ -80,3 +80,7 @@ documents:
     area: decisions
     kind: architecture-decision
     status: accepted
+  - path: docs/decisions/0011-database-backed-prediction-admission.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted

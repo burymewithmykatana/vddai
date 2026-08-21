@@ -142,6 +142,11 @@ JWT_EXPIRE_MINUTES=60
 MAX_IMAGE_SIZE_MB=5
 IMAGE_STORAGE_BACKEND=local
 IMAGE_STORAGE_ROOT=uploads
+PREDICTION_RATE_LIMIT_REQUESTS=10
+PREDICTION_RATE_LIMIT_WINDOW_SECONDS=60
+PREDICTION_USER_OUTSTANDING_LIMIT=5
+PREDICTION_GLOBAL_OUTSTANDING_LIMIT=50
+PREDICTION_CAPACITY_RETRY_AFTER_SECONDS=5
 
 MODEL_IMAGE_WIDTH=224
 MODEL_IMAGE_HEIGHT=224
@@ -169,6 +174,43 @@ three values are process configuration; timing values must be finite and
 positive, and the maximum must be a positive integer. Set the lease above the
 expected worst-case inference duration so live work is not needlessly
 reclaimed.
+
+### Prediction service limits
+
+Authenticated `POST /predictions` uses database-backed admission guardrails.
+The default effective limits are:
+
+| Limit | Default | Behavior at the boundary |
+|---|---:|---|
+| Upload file size | 5 MB | Exactly 5 MB is accepted; a larger file returns `413` |
+| Requests per authenticated user | 10 per 60 seconds | Further requests return `429` until the fixed window resets |
+| Outstanding jobs per user | 5 | Further requests from that user return `429` |
+| Outstanding jobs service-wide | 50 | Further requests return `503` |
+| Capacity retry hint | 5 seconds | Returned in `Retry-After` for outstanding-capacity errors |
+
+`queued` and every `processing` job count as outstanding, including retry-waiting
+or expired work awaiting W7D2 recovery. `completed`, `failed`, and
+`needs_review` are terminal and do not count. Administrators use the same
+creation limits as other authenticated users; their existing cross-owner read
+privilege does not bypass admission.
+
+Rate and capacity errors contain no user identities, queue occupancy, or
+internal database details. The rate-limit response returns the remaining
+fixed-window duration in `Retry-After`; capacity responses use
+`PREDICTION_CAPACITY_RETRY_AFTER_SECONDS`. A capacity-rejected upload creates no
+prediction row and its newly stored object is cleaned up through the image
+storage service.
+
+The upload service reads at most the configured limit plus one byte into
+application memory. Starlette has already received and spooled the multipart
+file before the route runs, so this application guardrail is not a replacement
+for deployment-level request-body and temporary-storage limits.
+
+All limit values must be positive integers, and the global outstanding limit
+cannot be lower than the per-user limit. Invalid configuration fails during
+settings initialization. See
+[ADR 0011](docs/decisions/0011-database-backed-prediction-admission.md) for the
+transaction and concurrency contract.
 
 ## Local Development: API on the Host
 

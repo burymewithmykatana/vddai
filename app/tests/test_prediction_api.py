@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.api.routes import prediction as prediction_route
 from app.contracts.inference import (
     INFERENCE_CONTRACT_SCHEMA_VERSION,
     MODEL_PACKAGE_SCHEMA_VERSION,
@@ -335,9 +336,15 @@ def test_create_prediction_commit_failure_removes_orphaned_upload(
 
     monkeypatch.setattr(object_store, "delete", record_delete)
     failing_session = SessionLocal()
+    real_commit = failing_session.commit
+    commit_count = 0
 
     def fail_commit() -> None:
-        raise SQLAlchemyError("simulated queue commit failure")
+        nonlocal commit_count
+        commit_count += 1
+        if commit_count == 2:
+            raise SQLAlchemyError("simulated queue commit failure")
+        real_commit()
 
     monkeypatch.setattr(failing_session, "commit", fail_commit)
 
@@ -401,7 +408,6 @@ def test_cleanup_failure_is_logged_without_hiding_database_failure(
     client: TestClient,
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     class CleanupFailingObjectStore:
         def write(self, object_key: str, contents: bytes) -> StoredObject:
@@ -422,28 +428,39 @@ def test_cleanup_failure_is_logged_without_hiding_database_failure(
         CleanupFailingObjectStore(),
     )
     failing_session = SessionLocal()
+    real_commit = failing_session.commit
+    commit_count = 0
 
     def fail_commit() -> None:
-        raise SQLAlchemyError("original database failure")
+        nonlocal commit_count
+        commit_count += 1
+        if commit_count == 2:
+            raise SQLAlchemyError("original database failure")
+        real_commit()
 
     monkeypatch.setattr(failing_session, "commit", fail_commit)
+    logged_messages: list[str] = []
+    monkeypatch.setattr(
+        prediction_route.logger,
+        "exception",
+        lambda message, *args: logged_messages.append(message),
+    )
 
     def override_get_db():
         yield failing_session
 
     app.dependency_overrides[get_db] = override_get_db
     try:
-        with caplog.at_level("ERROR"):
-            with pytest.raises(SQLAlchemyError, match="original database failure"):
-                client.post(
-                    "/predictions",
-                    headers=auth_headers,
-                    files=image_upload(),
-                )
+        with pytest.raises(SQLAlchemyError, match="original database failure"):
+            client.post(
+                "/predictions",
+                headers=auth_headers,
+                files=image_upload(),
+            )
     finally:
         failing_session.close()
 
-    assert "failed_to_delete_orphaned_image" in caplog.text
+    assert "failed_to_delete_orphaned_image object_key=%s" in logged_messages
 
 
 def test_create_prediction_requires_authentication(
@@ -1320,6 +1337,150 @@ def test_create_prediction_rejects_oversized_image(
 
     assert response.status_code == 413
     assert response.json()["detail"] == ("Image exceeds the maximum size of 1 MB.")
+
+
+def test_create_prediction_enforces_per_user_request_rate_with_retry_after(
+    client: TestClient,
+    db: Session,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    object_store = configure_local_image_storage(monkeypatch, tmp_path / "objects")
+    monkeypatch.setattr(settings, "PREDICTION_RATE_LIMIT_REQUESTS", 1)
+    monkeypatch.setattr(settings, "PREDICTION_RATE_LIMIT_WINDOW_SECONDS", 60)
+
+    first = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(),
+    )
+    second = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(),
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 429
+    assert second.json()["detail"] == (
+        "Prediction request rate limit exceeded. Retry later."
+    )
+    assert 1 <= int(second.headers["Retry-After"]) <= 60
+    assert db.query(Prediction).count() == 1
+    assert (
+        len([path for path in object_store.root_directory.rglob("*") if path.is_file()])
+        == 1
+    )
+
+
+def test_create_prediction_enforces_per_user_outstanding_limit_and_cleans_upload(
+    client: TestClient,
+    db: Session,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    object_store = configure_local_image_storage(monkeypatch, tmp_path / "objects")
+    monkeypatch.setattr(settings, "PREDICTION_USER_OUTSTANDING_LIMIT", 1)
+
+    first = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(),
+    )
+    second = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(),
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 429
+    assert second.headers["Retry-After"] == str(
+        settings.PREDICTION_CAPACITY_RETRY_AFTER_SECONDS
+    )
+    assert second.json()["detail"] == (
+        "Too many outstanding prediction jobs. Retry later."
+    )
+    assert db.query(Prediction).count() == 1
+    assert (
+        len([path for path in object_store.root_directory.rglob("*") if path.is_file()])
+        == 1
+    )
+
+
+def test_create_prediction_enforces_global_capacity_without_disclosing_queue_details(
+    client: TestClient,
+    db: Session,
+    test_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    object_store = configure_local_image_storage(monkeypatch, tmp_path / "objects")
+    other_user = User(
+        email="global-capacity@example.com",
+        hashed_password="not-a-real-password",
+        is_active=True,
+        is_admin=False,
+    )
+    db.add(other_user)
+    db.commit()
+    db.refresh(other_user)
+    create_queued_prediction(db, test_user.id)
+    monkeypatch.setattr(settings, "PREDICTION_USER_OUTSTANDING_LIMIT", 1)
+    monkeypatch.setattr(settings, "PREDICTION_GLOBAL_OUTSTANDING_LIMIT", 1)
+    token = create_access_token(subject=other_user.id)
+
+    response = client.post(
+        "/predictions",
+        headers={"Authorization": f"Bearer {token}"},
+        files=image_upload(),
+    )
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == str(
+        settings.PREDICTION_CAPACITY_RETRY_AFTER_SECONDS
+    )
+    assert response.json()["detail"] == (
+        "Prediction service is temporarily at capacity. Retry later."
+    )
+    assert "1" not in response.text
+    assert db.query(Prediction).count() == 1
+    assert not any(path.is_file() for path in object_store.root_directory.rglob("*"))
+
+
+def test_admin_prediction_creation_has_no_admission_limit_exemption(
+    client: TestClient,
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configure_local_image_storage(monkeypatch, tmp_path / "objects")
+    admin = User(
+        email="limited-admin@example.com",
+        hashed_password="not-a-real-password",
+        is_active=True,
+        is_admin=True,
+    )
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+    create_queued_prediction(db, admin.id)
+    monkeypatch.setattr(settings, "PREDICTION_USER_OUTSTANDING_LIMIT", 1)
+    token = create_access_token(subject=admin.id)
+
+    response = client.post(
+        "/predictions",
+        headers={"Authorization": f"Bearer {token}"},
+        files=image_upload(),
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == (
+        "Too many outstanding prediction jobs. Retry later."
+    )
+    assert db.query(Prediction).count() == 1
 
 
 def test_create_prediction_rejects_invalid_token(

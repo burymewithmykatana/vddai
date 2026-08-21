@@ -16,6 +16,10 @@ public benchmark results.
 - Authenticate users with bearer JWTs and reject inactive users.
 - Accept size-limited JPEG, PNG, and WebP uploads after structural decoding and
   media-type validation.
+- Bound application upload reads to the configured maximum plus one byte and
+  reject oversized uploads before image decoding or storage.
+- Rate-limit authenticated prediction submissions per user and cap per-user
+  and service-wide outstanding work with explicit retryable failures.
 - Generate opaque server-controlled image object keys and owner-scoped
   prediction records.
 - Process predictions asynchronously through the database-backed worker queue.
@@ -52,6 +56,10 @@ public benchmark results.
 
 - Apply persistent schema changes through Alembic.
 - Keep transaction ownership explicit and roll back failed units of work.
+- Serialize prediction count-and-insert admission through PostgreSQL so
+  simultaneous API requests cannot exceed configured outstanding limits.
+- Count `queued` and `processing` predictions as outstanding while excluding
+  all terminal states, including `needs_review`.
 - Prevent concurrent workers from claiming the same queued row.
 - Commit a bounded lease and monotonically increasing attempt token before
   inference, without holding a database transaction during inference.
@@ -81,6 +89,8 @@ public benchmark results.
   worker orchestration compatible with a future object-storage backend.
 - Validate dependencies, documentation structure, tests, and Compose wiring
   through the repository verification gate.
+- Fail during configuration initialization when upload, rate, outstanding, or
+  retry-hint limits are non-positive or globally inconsistent.
 - Keep generated datasets, feature banks, thresholds, evaluation runs, model
   weights, and runtime state outside Git.
 
@@ -96,6 +106,7 @@ safety/regulatory certification.
 
 - [`../decisions/README.md`](../decisions/README.md)
 - [`../decisions/0010-database-backed-prediction-reliability.md`](../decisions/0010-database-backed-prediction-reliability.md)
+- [`../decisions/0011-database-backed-prediction-admission.md`](../decisions/0011-database-backed-prediction-admission.md)
 - [`../engineering/data-lineage.md`](../engineering/data-lineage.md)
 - [`../product/product-definition.md`](../product/product-definition.md)
 - [`../../AGENTS.md`](../../AGENTS.md)

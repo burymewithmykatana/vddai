@@ -158,22 +158,24 @@ The queue is PostgreSQL-backed. Redis is not the current prediction broker.
 
 Preserve the worker sequence:
 
-1. select the oldest queued row by creation time and ID;
-2. claim it with `FOR UPDATE SKIP LOCKED`;
-3. transition it to timestamped `processing` and commit the claim;
+1. recover at most one expired or legacy lease-less processing row;
+2. select the oldest queued or due-retry row by creation time and ID;
+3. claim it with `FOR UPDATE SKIP LOCKED`, increment its attempt token, assign a
+   lease, and commit the claim;
 4. retrieve its stored input through the image-storage service by opaque key;
-5. persist the full completed result in one transaction; or
-6. roll back, reload the row, clear stale result data, and attempt to persist a
-   safe terminal failure.
+5. relock and persist the full completed result only for the current attempt; or
+6. roll back, relock, and schedule a bounded retry or safe terminal failure.
 
-Do not hold the claim transaction open during inference or weaken concurrent
-claim protection. Detailed failures belong in internal logs/database
-diagnostics; API clients receive only the stable public failure code.
+Do not hold the claim transaction open during inference, weaken concurrent
+claim protection, or permit a stale attempt to settle. Detailed failures belong
+in internal logs/database diagnostics; API clients receive only the stable
+public failure code.
 
-Database polling currently has no lease, retry policy, or crash recovery for a
-worker lost after the processing commit. Do not claim those guarantees exist.
-Adding them requires an explicit reliability task with lifecycle and
-concurrency tests.
+Prediction admission counts both `queued` and `processing`, including retry
+waiting and expired work, while excluding terminal statuses. Preserve the
+database-backed per-user rate state and singleton-row-locked count-and-insert
+transaction; do not replace it with a race-prone count followed by an unlocked
+insert. ADR 0010 defines attempt reliability and ADR 0011 defines admission.
 
 ## Production Inference Integration
 

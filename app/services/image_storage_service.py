@@ -151,9 +151,18 @@ class ImageStorageService:
 
     def store(self, image: UploadFile) -> StoredImage:
         try:
-            contents = image.file.read()
-
             maximum_size_bytes = settings.MAX_IMAGE_SIZE_MB * 1024 * 1024
+
+            if image.size is not None and image.size > maximum_size_bytes:
+                raise HTTPException(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    detail=(
+                        f"Image exceeds the maximum size of "
+                        f"{settings.MAX_IMAGE_SIZE_MB} MB."
+                    ),
+                )
+
+            contents = image.file.read(maximum_size_bytes + 1)
 
             if len(contents) > maximum_size_bytes:
                 raise HTTPException(

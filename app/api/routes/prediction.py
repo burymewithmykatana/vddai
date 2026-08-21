@@ -12,14 +12,36 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.core.config import settings
 from app.models.prediction import Prediction, PredictionStatus
 from app.models.user import User
 from app.schemas import PredictionQueuedResponse, PredictionRead
 from app.services.image_storage_service import image_storage_service
+from app.services.prediction_admission_service import (
+    PredictionAdmissionUnavailableError,
+    PredictionGlobalCapacityExceededError,
+    PredictionRequestRateExceededError,
+    PredictionUserOutstandingExceededError,
+    prediction_admission_service,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
+
+
+def _retry_after_header(seconds: int) -> dict[str, str]:
+    return {"Retry-After": str(seconds)}
+
+
+def _delete_orphaned_image(object_key: str) -> None:
+    try:
+        image_storage_service.delete(object_key)
+    except Exception:
+        logger.exception(
+            "failed_to_delete_orphaned_image object_key=%s",
+            object_key,
+        )
 
 
 @router.post(
@@ -32,30 +54,70 @@ def create_prediction_job(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PredictionQueuedResponse:
+    user_id = current_user.id
+    try:
+        prediction_admission_service.consume_request_slot(
+            db,
+            user_id=user_id,
+        )
+        db.commit()
+    except PredictionRequestRateExceededError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Prediction request rate limit exceeded. Retry later.",
+            headers=_retry_after_header(exc.retry_after_seconds),
+        ) from exc
+    except PredictionAdmissionUnavailableError as exc:
+        db.rollback()
+        logger.exception("prediction_rate_admission_unavailable user_id=%s", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Prediction service is temporarily unavailable. Retry later.",
+            headers=_retry_after_header(
+                settings.PREDICTION_CAPACITY_RETRY_AFTER_SECONDS
+            ),
+        ) from exc
+
     stored_image = image_storage_service.store(image)
 
     try:
-        prediction = Prediction(
-            user_id=current_user.id,
-            image_object_key=stored_image.object_key,
-            image_format=stored_image.format,
-            image_width=stored_image.width,
-            image_height=stored_image.height,
-            status=PredictionStatus.QUEUED.value,
+        prediction = prediction_admission_service.admit_prediction(
+            db,
+            user_id=user_id,
+            stored_image=stored_image,
         )
-        db.add(prediction)
         db.commit()
+    except PredictionUserOutstandingExceededError as exc:
+        db.rollback()
+        _delete_orphaned_image(stored_image.object_key)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many outstanding prediction jobs. Retry later.",
+            headers=_retry_after_header(exc.retry_after_seconds),
+        ) from exc
+    except PredictionGlobalCapacityExceededError as exc:
+        db.rollback()
+        _delete_orphaned_image(stored_image.object_key)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Prediction service is temporarily at capacity. Retry later.",
+            headers=_retry_after_header(exc.retry_after_seconds),
+        ) from exc
+    except PredictionAdmissionUnavailableError as exc:
+        db.rollback()
+        _delete_orphaned_image(stored_image.object_key)
+        logger.exception("prediction_queue_admission_unavailable user_id=%s", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Prediction service is temporarily unavailable. Retry later.",
+            headers=_retry_after_header(
+                settings.PREDICTION_CAPACITY_RETRY_AFTER_SECONDS
+            ),
+        ) from exc
     except Exception:
         db.rollback()
-
-        try:
-            image_storage_service.delete(stored_image.object_key)
-        except Exception:
-            logger.exception(
-                "failed_to_delete_orphaned_image object_key=%s",
-                stored_image.object_key,
-            )
-
+        _delete_orphaned_image(stored_image.object_key)
         raise
 
     db.refresh(prediction)
