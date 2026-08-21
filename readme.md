@@ -4,11 +4,11 @@ Production-oriented backend for authenticated, asynchronous visual anomaly
 detection. VDDAI is designed as a reusable pilot platform rather than a
 detector tied to one product category.
 
-> **Status:** Registry-selected production inference and W7D2 prediction
-> reliability are complete in the proposed v0.1.0 working tree. Authenticated
-> prediction jobs use bounded retries, attempt leases, stale-work recovery, and
-> fenced terminal persistence while preserving the frozen MVTec AD `tile`
-> inference and public API contracts.
+> **Status:** Registry-selected production inference, W7D2 prediction
+> reliability, and W7D3 admission guardrails are merged for v0.1.0.
+> Authenticated prediction jobs use bounded admission, retries, leases,
+> stale-work recovery, and fenced terminal persistence while preserving the
+> frozen MVTec AD `tile` inference and public API contracts.
 
 ## Start Here
 
@@ -19,6 +19,7 @@ detector tied to one product category.
 | Configure the real model package | [Configuration](#configuration) and [Week 5 production inference](#week-5-production-inference) |
 | Understand prediction retries and recovery | [Prediction reliability and recovery](#prediction-reliability-and-recovery) and [ADR 0010](docs/decisions/0010-database-backed-prediction-reliability.md) |
 | Prove the complete inference flow | [W6D1 inference gate](#w6d1-reproducible-real-inference-gate) |
+| Run the production security and reliability gate | [W7D4 production gate](#w7d4-production-security-and-reliability-gate) and [risk register](docs/engineering/production-readiness.md) |
 | Track and query the Week 4 baseline | [Week 6 experiment tracking](#week-6-experiment-tracking) |
 | Reproduce the data and model baseline | [MVTec AD dataset](#mvtec-ad-tile-dataset) and [Week 4 baseline](#week-4-complete) |
 | Understand image transformations | [Image preprocessing contract](#image-preprocessing-contract) |
@@ -47,7 +48,7 @@ the host, change the database and Redis hosts to `localhost` as described in
 | Data contract | Validated MVTec AD `tile` ingestion, deterministic splits and fingerprints, mask handling, and shared offline/online preprocessing |
 | Model baseline | Frozen ResNet-18 features, exact Euclidean nearest-neighbor scoring, and a validation-only frozen threshold |
 | Production inference | Fail-closed package loading, checksum and lineage validation, worker-side inference, bounded retries, lease recovery, fenced lifecycle persistence, and safe failures |
-| Verification | Canonical gate with 297 passing tests and 2 optional PostgreSQL tests, plus PostgreSQL 16 concurrency, restart-recovery, and migration QA |
+| Verification | Canonical gate with 322 tests, including 6 explicit PostgreSQL 16 concurrency and migration tests; the W7D4 production marker selects 143 cross-boundary tests |
 
 ## Project Goal
 
@@ -346,12 +347,41 @@ docker compose exec api python scripts/prove_real_inference.py
 ```
 
 The deployed-stack probe creates isolated local-development users, uploads a
-small PNG through the authenticated API, confirms another user receives the
-same non-disclosing `404` as a missing prediction, waits for the worker, and
-validates the persisted score, threshold, label, latency, package ID, and
-public-safe lineage. If package members or weights are unavailable, the worker
-fails closed and the probe reports `inference_failed`; inspect the worker logs
-for the private local diagnostic.
+small PNG through the authenticated API, confirms health dependencies,
+unauthenticated rejection, malformed JSON handling, corrupt-image rejection
+without prediction history, and the same non-disclosing cross-owner `404` as a
+missing prediction. It then waits for the worker and validates the persisted
+score, threshold, label, latency, package ID, and public-safe lineage. If
+package members or weights are unavailable, the worker fails closed and the
+probe reports `inference_failed`; inspect the worker logs for the private local
+diagnostic. The probe refuses an API that identifies itself as `production`.
+
+### W7D4 Production Security and Reliability Gate
+
+The W7D4 marker assembles the existing API, storage, admission, worker,
+inference-contract, package-loader, and selected-package regression coverage.
+It also runs PostgreSQL concurrency and full Alembic
+upgrade/downgrade/re-upgrade coverage when an explicit disposable PostgreSQL 16
+URL is configured:
+
+```powershell
+$env:VDDAI_TEST_POSTGRES_DATABASE_URL = "<disposable-postgresql-16-url>"
+python -m pytest -q -m w7_production_gate
+```
+
+PostgreSQL tests create UUID-named schemas and remove only those schemas. A
+skipped PostgreSQL test does not satisfy W7D4, and the URL must never target a
+production database. Run the deployed proof after provisioning the ignored
+registry, model artifacts, feature bank, and cached ResNet-18 checkpoint:
+
+```powershell
+docker compose up --build -d
+docker compose ps
+docker compose exec api python scripts/prove_real_inference.py
+```
+
+The complete gate definition, owner-tagged risks, and release conditions are in
+[`docs/engineering/production-readiness.md`](docs/engineering/production-readiness.md).
 
 View API logs:
 

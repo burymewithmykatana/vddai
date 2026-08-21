@@ -21,6 +21,7 @@ from app.workers.prediction_worker import (
 POSTGRES_TEST_URL = os.environ.get("VDDAI_TEST_POSTGRES_DATABASE_URL")
 
 pytestmark = [
+    pytest.mark.w7_production_gate,
     pytest.mark.postgres_integration,
     pytest.mark.skipif(
         not POSTGRES_TEST_URL,

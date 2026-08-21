@@ -1,8 +1,11 @@
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
+
+pytestmark = pytest.mark.w7_production_gate
 
 
 def test_prediction_admission_migration_upgrades_and_downgrades(

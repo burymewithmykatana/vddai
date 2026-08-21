@@ -48,6 +48,8 @@ from app.tests.model_package_fixtures import (
 from app.workers import prediction_worker
 from app.workers.prediction_worker import process_next_prediction, run_forever
 
+pytestmark = pytest.mark.w7_production_gate
+
 
 @pytest.fixture
 def auth_headers(test_user: User) -> dict[str, str]:

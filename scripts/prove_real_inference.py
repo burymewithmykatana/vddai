@@ -14,24 +14,28 @@ from PIL import Image
 
 
 class InferenceGateError(RuntimeError):
-    """Raised when the deployed inference flow violates the W6D1 gate."""
+    """Raised when the deployed inference flow violates the production gate."""
 
 
 def _json_bytes(payload: dict[str, object]) -> bytes:
     return json.dumps(payload).encode("utf-8")
 
 
-def _decode_json(body: bytes, *, context: str) -> dict[str, Any]:
+def _decode_json_value(body: bytes, *, context: str) -> Any:
     try:
-        payload = json.loads(body.decode("utf-8"))
+        return json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise InferenceGateError(f"{context} returned invalid JSON.") from exc
+
+
+def _decode_json(body: bytes, *, context: str) -> dict[str, Any]:
+    payload = _decode_json_value(body, context=context)
     if not isinstance(payload, dict):
         raise InferenceGateError(f"{context} returned a non-object JSON response.")
     return payload
 
 
-def _request_json(
+def _request_json_value(
     *,
     method: str,
     url: str,
@@ -39,7 +43,7 @@ def _request_json(
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
     timeout_seconds: float = 10.0,
-) -> dict[str, Any]:
+) -> Any:
     http_request = request.Request(
         url,
         data=body,
@@ -57,12 +61,61 @@ def _request_json(
         raise InferenceGateError(f"Unable to reach {url}: {exc.reason}") from exc
 
     if status != expected_status:
-        detail = _decode_json(response_body, context=url).get("detail")
+        response_payload = _decode_json_value(response_body, context=url)
+        detail = (
+            response_payload.get("detail")
+            if isinstance(response_payload, dict)
+            else response_payload
+        )
         raise InferenceGateError(
             f"{method} {url} returned {status}; expected {expected_status}. "
             f"Public detail: {detail!r}."
         )
-    return _decode_json(response_body, context=url)
+    return _decode_json_value(response_body, context=url)
+
+
+def _request_json(
+    *,
+    method: str,
+    url: str,
+    expected_status: int,
+    body: bytes | None = None,
+    headers: dict[str, str] | None = None,
+    timeout_seconds: float = 10.0,
+) -> dict[str, Any]:
+    payload = _request_json_value(
+        method=method,
+        url=url,
+        expected_status=expected_status,
+        body=body,
+        headers=headers,
+        timeout_seconds=timeout_seconds,
+    )
+    if not isinstance(payload, dict):
+        raise InferenceGateError(f"{url} returned a non-object JSON response.")
+    return payload
+
+
+def _request_json_list(
+    *,
+    method: str,
+    url: str,
+    expected_status: int,
+    headers: dict[str, str] | None = None,
+    timeout_seconds: float = 10.0,
+) -> list[dict[str, Any]]:
+    payload = _request_json_value(
+        method=method,
+        url=url,
+        expected_status=expected_status,
+        headers=headers,
+        timeout_seconds=timeout_seconds,
+    )
+    if not isinstance(payload, list) or not all(
+        isinstance(item, dict) for item in payload
+    ):
+        raise InferenceGateError(f"{url} returned an invalid JSON list response.")
+    return payload
 
 
 def _create_probe_image() -> bytes:
@@ -81,6 +134,43 @@ def _multipart_image_body(image_bytes: bytes) -> tuple[bytes, str]:
     body += image_bytes
     body += f"\r\n--{boundary}--\r\n".encode("ascii")
     return body, f"multipart/form-data; boundary={boundary}"
+
+
+def validate_health_checks(
+    *,
+    service: dict[str, Any],
+    database: dict[str, Any],
+    model: dict[str, Any],
+) -> str:
+    if service.get("status") != "ok":
+        raise InferenceGateError("Service health check did not report ok.")
+    environment = service.get("environment")
+    if not isinstance(environment, str) or not environment:
+        raise InferenceGateError("Service health check has no environment identity.")
+    if environment.casefold() == "production":
+        raise InferenceGateError(
+            "The production gate creates test users and data and must not run "
+            "against a production environment."
+        )
+    if database != {"status": "ok", "database": "connected"}:
+        raise InferenceGateError("Database health check did not report connected.")
+    if model.get("status") != "selected":
+        raise InferenceGateError("Model health check did not report a selection.")
+    for field in ("model_version", "package_id"):
+        value = model.get(field)
+        if not isinstance(value, str) or not value:
+            raise InferenceGateError(f"Model health check has no {field}.")
+    for private_field in (
+        "registry_path",
+        "artifact_path",
+        "manifest_path",
+        "feature_bank_path",
+    ):
+        if private_field in model:
+            raise InferenceGateError(
+                f"Model health check exposed private field {private_field}."
+            )
+    return environment
 
 
 def _register_and_login(base_url: str, *, role: str) -> str:
@@ -163,10 +253,71 @@ def validate_completed_prediction(payload: dict[str, Any]) -> dict[str, object]:
 
 def prove_real_inference(*, base_url: str, timeout_seconds: float) -> dict[str, object]:
     base_url = base_url.rstrip("/")
+    service_health = _request_json(
+        method="GET",
+        url=f"{base_url}/health",
+        expected_status=200,
+    )
+    database_health = _request_json(
+        method="GET",
+        url=f"{base_url}/health/db",
+        expected_status=200,
+    )
+    model_health = _request_json(
+        method="GET",
+        url=f"{base_url}/health/model",
+        expected_status=200,
+    )
+    validate_health_checks(
+        service=service_health,
+        database=database_health,
+        model=model_health,
+    )
+
+    _request_json(
+        method="GET",
+        url=f"{base_url}/predictions",
+        expected_status=401,
+    )
+    _request_json(
+        method="POST",
+        url=f"{base_url}/auth/login",
+        expected_status=422,
+        body=b'{"email":',
+        headers={"Content-Type": "application/json"},
+    )
+
     owner_token = _register_and_login(base_url, role="owner")
     other_token = _register_and_login(base_url, role="other")
     owner_headers = {"Authorization": f"Bearer {owner_token}"}
     other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    history_before = _request_json_list(
+        method="GET",
+        url=f"{base_url}/predictions",
+        expected_status=200,
+        headers=owner_headers,
+    )
+    corrupt_body, corrupt_content_type = _multipart_image_body(
+        b"corrupt-image-contents"
+    )
+    _request_json(
+        method="POST",
+        url=f"{base_url}/predictions",
+        expected_status=400,
+        body=corrupt_body,
+        headers={**owner_headers, "Content-Type": corrupt_content_type},
+    )
+    history_after = _request_json_list(
+        method="GET",
+        url=f"{base_url}/predictions",
+        expected_status=200,
+        headers=owner_headers,
+    )
+    if history_after != history_before:
+        raise InferenceGateError(
+            "Rejected corrupt upload changed the owner's prediction history."
+        )
 
     upload_body, content_type = _multipart_image_body(_create_probe_image())
     queued = _request_json(
@@ -224,7 +375,10 @@ def prove_real_inference(*, base_url: str, timeout_seconds: float) -> dict[str, 
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Prove the deployed W6D1 authenticated real-inference flow."
+        description=(
+            "Prove the deployed production security, reliability, and "
+            "real-inference flow."
+        )
     )
     parser.add_argument(
         "--base-url",
@@ -250,8 +404,8 @@ def main() -> None:
             timeout_seconds=arguments.timeout_seconds,
         )
     except InferenceGateError as exc:
-        raise SystemExit(f"W6D1 real-inference gate failed: {exc}") from exc
-    print("W6D1 real-inference gate passed.")
+        raise SystemExit(f"W7D4 production gate failed: {exc}") from exc
+    print("W7D4 production gate passed, including real inference.")
     print(json.dumps(summary, indent=2, sort_keys=True))
 
 

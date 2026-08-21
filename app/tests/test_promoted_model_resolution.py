@@ -49,6 +49,8 @@ from app.tests.model_package_fixtures import (
 )
 from app.workers.prediction_worker import process_next_prediction
 
+pytestmark = pytest.mark.w7_production_gate
+
 CRITERIA = PromotionCriteria(minimum_metrics={"validation_threshold_f1": 0.80})
 
 
