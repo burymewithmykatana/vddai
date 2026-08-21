@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,9 +14,15 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = "change-this-secret"
     JWT_EXPIRE_MINUTES: int = 60
 
-    MAX_IMAGE_SIZE_MB: int = 5
+    MAX_IMAGE_SIZE_MB: int = Field(default=5, ge=1)
     IMAGE_STORAGE_BACKEND: Literal["local"] = "local"
     IMAGE_STORAGE_ROOT: str = "uploads"
+
+    PREDICTION_RATE_LIMIT_REQUESTS: int = Field(default=10, ge=1)
+    PREDICTION_RATE_LIMIT_WINDOW_SECONDS: int = Field(default=60, ge=1)
+    PREDICTION_USER_OUTSTANDING_LIMIT: int = Field(default=5, ge=1)
+    PREDICTION_GLOBAL_OUTSTANDING_LIMIT: int = Field(default=50, ge=1)
+    PREDICTION_CAPACITY_RETRY_AFTER_SECONDS: int = Field(default=5, ge=1)
 
     MODEL_IMAGE_WIDTH: int = 224
     MODEL_IMAGE_HEIGHT: int = 224
@@ -46,6 +52,17 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=True,
     )
+
+    @model_validator(mode="after")
+    def validate_prediction_capacity_limits(self) -> "Settings":
+        if (
+            self.PREDICTION_GLOBAL_OUTSTANDING_LIMIT
+            < self.PREDICTION_USER_OUTSTANDING_LIMIT
+        ):
+            raise ValueError(
+                "Global prediction capacity cannot be below the per-user limit."
+            )
+        return self
 
 
 settings = Settings()

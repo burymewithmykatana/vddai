@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 import re
@@ -14,7 +15,9 @@ from app.services.image_storage_service import (
     InvalidImageObjectKeyError,
     LocalFilesystemImageObjectStore,
     StoredImageNotFoundError,
+    StoredObject,
 )
+from app.services.image_validation_service import ValidatedImage
 
 
 def _png_bytes() -> bytes:
@@ -114,3 +117,113 @@ def test_prediction_object_key_keeps_legacy_physical_column_name() -> None:
 
     assert mapped_column.name == "image_path"
     assert Prediction.__table__.c.image_path is mapped_column
+
+
+class ReadSizeTrackingBuffer(BytesIO):
+    def __init__(self, contents: bytes) -> None:
+        super().__init__(contents)
+        self.requested_sizes: list[int] = []
+
+    def read(self, size: int = -1) -> bytes:
+        self.requested_sizes.append(size)
+        return super().read(size)
+
+
+@dataclass
+class RecordingObjectStore:
+    contents: bytes | None = None
+
+    def write(self, object_key: str, contents: bytes) -> StoredObject:
+        self.contents = contents
+        return StoredObject(object_key=object_key, size_bytes=len(contents))
+
+    def read(self, object_key: str) -> bytes:
+        assert self.contents is not None
+        return self.contents
+
+    def delete(self, object_key: str) -> bool:
+        self.contents = None
+        return True
+
+    def exists(self, object_key: str) -> bool:
+        return self.contents is not None
+
+
+def test_store_reads_only_limit_plus_one_and_accepts_exact_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import settings
+    from app.services import image_storage_service as storage_module
+
+    monkeypatch.setattr(settings, "MAX_IMAGE_SIZE_MB", 1)
+    monkeypatch.setattr(
+        storage_module.image_validation_service,
+        "validate",
+        lambda **kwargs: ValidatedImage(
+            format="PNG",
+            extension=".png",
+            width=8,
+            height=6,
+        ),
+    )
+    contents = b"x" * (1024 * 1024)
+    buffer = ReadSizeTrackingBuffer(contents)
+    object_store = RecordingObjectStore()
+    service = ImageStorageService(object_store)
+    upload = UploadFile(
+        file=buffer,
+        filename="boundary.png",
+        size=None,
+        headers=Headers({"content-type": "image/png"}),
+    )
+
+    service.store(upload)
+
+    assert buffer.requested_sizes == [1024 * 1024 + 1]
+    assert object_store.contents == contents
+
+
+def test_store_rejects_limit_plus_one_without_unbounded_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "MAX_IMAGE_SIZE_MB", 1)
+    buffer = ReadSizeTrackingBuffer(b"x" * (1024 * 1024 + 1))
+    object_store = RecordingObjectStore()
+    service = ImageStorageService(object_store)
+    upload = UploadFile(
+        file=buffer,
+        filename="oversized.png",
+        size=None,
+        headers=Headers({"content-type": "image/png"}),
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        service.store(upload)
+
+    assert getattr(exc_info.value, "status_code", None) == 413
+    assert buffer.requested_sizes == [1024 * 1024 + 1]
+    assert object_store.contents is None
+
+
+def test_store_rejects_reported_oversize_without_reading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "MAX_IMAGE_SIZE_MB", 1)
+    buffer = ReadSizeTrackingBuffer(b"small")
+    service = ImageStorageService(RecordingObjectStore())
+    upload = UploadFile(
+        file=buffer,
+        filename="reported-oversized.png",
+        size=1024 * 1024 + 1,
+        headers=Headers({"content-type": "image/png"}),
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        service.store(upload)
+
+    assert getattr(exc_info.value, "status_code", None) == 413
+    assert buffer.requested_sizes == []
