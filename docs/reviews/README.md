@@ -19,6 +19,11 @@ The W7D2 prediction-reliability review series is:
 1. [`2026-08-20-w7d2-prediction-reliability.md`](2026-08-20-w7d2-prediction-reliability.md)
 2. [`2026-08-21-w7d2-prediction-reliability-r2.md`](2026-08-21-w7d2-prediction-reliability-r2.md)
 
+The W7D4 production-security-and-reliability review series is:
+
+1. [`2026-08-22-w7d4-production-security-reliability-gate.md`](2026-08-22-w7d4-production-security-reliability-gate.md)
+2. [`2026-08-22-w7d4-production-security-reliability-gate-r2.md`](2026-08-22-w7d4-production-security-reliability-gate-r2.md)
+
 For a new task, create a new dated report series with the task slug. Never edit
 an earlier report to make a later result appear cleaner; add remediation and
 re-review evidence.

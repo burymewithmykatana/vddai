@@ -12,8 +12,9 @@ it does not replace executable tests, accepted ADRs, independent review, QA,
 or human deployment approval.
 
 Run the gate only against a disposable local or test environment. The deployed
-probe creates users, prediction history, and a stored image, and it refuses an
-API whose `/health` response identifies the environment as `production`.
+probe creates users, prediction history, and a stored image. It accepts only an
+API whose `/health` response identifies the environment as `development` or
+`test`; every other identity fails before the first mutating request.
 
 ## Gate outcome
 
@@ -47,6 +48,10 @@ The `w7_production_gate` pytest marker selects the permanent regression suite.
 `VDDAI_TEST_POSTGRES_DATABASE_URL` must point to an explicitly disposable
 PostgreSQL 16 database. The PostgreSQL tests create UUID-named schemas and drop
 only those schemas, but the database must still never be a production target.
+`scripts/run_production_gate.py` is the authoritative entry point: it blocks
+before pytest when the URL is absent and returns a failed result if any required
+PostgreSQL test is missing or skipped. Running the marker directly retains the
+canonical suite's optional-PostgreSQL behavior and is not a W7D4 verdict.
 
 ## Required commands
 
@@ -54,7 +59,7 @@ From the repository root:
 
 ```powershell
 $env:VDDAI_TEST_POSTGRES_DATABASE_URL = "<disposable-postgresql-16-url>"
-python -m pytest -q -m w7_production_gate
+python scripts/run_production_gate.py
 python -m pytest -q app/tests/test_prove_real_inference.py
 python scripts/validate_docs.py
 .\scripts\verify.ps1 -IncludeDockerConfig
@@ -83,7 +88,7 @@ Do not use `docker compose down -v` as part of this gate.
 | `W7-R04` | Input retention follows prediction-history lifetime; no automated retention scheduler or public delete flow exists. | Product / Platform | Release blocker before customer images | Approve an operator-owned retention and deletion procedure before accepting customer data. Automated retention remains out of W7D4 scope. |
 | `W7-R05` | Registry, feature-bank, threshold, and ResNet-18 weight files are provisioned runtime dependencies outside Git. | ML / Platform | Release blocker | The exact promoted selection and all checksummed artifacts must be present, and the deployed proof must pass without download or fallback. Promotion remains human-approved. |
 | `W7-R06` | Downgrade removes retry/lease and admission state introduced by W7D2/W7D3. | Platform / Database | Release blocker for rollback | Stop all workers, confirm no processing row depends on recovery metadata, back up the target, and obtain human rollback approval. The gate exercises downgrade only in its isolated schema. |
-| `W7-R07` | The deployed probe creates two users, a prediction row, and an input object and intentionally does not perform record-coupled cleanup. | QA / Platform | Operational | Run only against a disposable environment and record its target identity. Never point the probe at production. |
+| `W7-R07` | The deployed probe creates two users, a prediction row, and an input object and intentionally does not perform record-coupled cleanup. | QA / Platform | Operational | Run only against a disposable environment identified by `/health` as `development` or `test`, and record its target identity. Every other identity fails closed before data creation. |
 | `W7-R08` | Automated alerting and production dashboards are scheduled after Week 7. | Platform | Conditional release blocker | Do not operate an unattended pilot until the later monitoring gate supplies alerts, dashboards, and an operator runbook. A supervised local pilot must record this limitation. |
 
 ## Evidence record

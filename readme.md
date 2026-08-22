@@ -5,10 +5,11 @@ detection. VDDAI is designed as a reusable pilot platform rather than a
 detector tied to one product category.
 
 > **Status:** Registry-selected production inference, W7D2 prediction
-> reliability, and W7D3 admission guardrails are merged for v0.1.0.
-> Authenticated prediction jobs use bounded admission, retries, leases,
-> stale-work recovery, and fenced terminal persistence while preserving the
-> frozen MVTec AD `tile` inference and public API contracts.
+> reliability, W7D3 admission guardrails, and the W7D4 production security and
+> reliability gate are implemented for v0.1.0. Authenticated prediction jobs
+> use bounded admission, retries, leases, stale-work recovery, and fenced
+> terminal persistence while preserving the frozen MVTec AD `tile` inference
+> and public API contracts.
 
 ## Start Here
 
@@ -48,7 +49,7 @@ the host, change the database and Redis hosts to `localhost` as described in
 | Data contract | Validated MVTec AD `tile` ingestion, deterministic splits and fingerprints, mask handling, and shared offline/online preprocessing |
 | Model baseline | Frozen ResNet-18 features, exact Euclidean nearest-neighbor scoring, and a validation-only frozen threshold |
 | Production inference | Fail-closed package loading, checksum and lineage validation, worker-side inference, bounded retries, lease recovery, fenced lifecycle persistence, and safe failures |
-| Verification | Canonical gate with 322 tests, including 6 explicit PostgreSQL 16 concurrency and migration tests; the W7D4 production marker selects 143 cross-boundary tests |
+| Verification | Canonical gate with 340 tests, including 6 explicit PostgreSQL 16 concurrency and migration tests; the W7D4 production marker selects 161 cross-boundary tests |
 
 ## Project Goal
 
@@ -354,7 +355,9 @@ missing prediction. It then waits for the worker and validates the persisted
 score, threshold, label, latency, package ID, and public-safe lineage. If
 package members or weights are unavailable, the worker fails closed and the
 probe reports `inference_failed`; inspect the worker logs for the private local
-diagnostic. The probe refuses an API that identifies itself as `production`.
+diagnostic. Because the probe creates retained data, it accepts only an API
+that identifies itself as `development` or `test` and rejects every other
+environment before registration or upload.
 
 ### W7D4 Production Security and Reliability Gate
 
@@ -366,13 +369,17 @@ URL is configured:
 
 ```powershell
 $env:VDDAI_TEST_POSTGRES_DATABASE_URL = "<disposable-postgresql-16-url>"
-python -m pytest -q -m w7_production_gate
+python scripts/run_production_gate.py
 ```
 
 PostgreSQL tests create UUID-named schemas and remove only those schemas. A
-skipped PostgreSQL test does not satisfy W7D4, and the URL must never target a
+missing URL, skipped PostgreSQL test, or missing required PostgreSQL test makes
+the strict runner fail. Running the pytest marker directly retains optional
+PostgreSQL skips and is not a W7D4 verdict. The URL must never target a
 production database. Run the deployed proof after provisioning the ignored
-registry, model artifacts, feature bank, and cached ResNet-18 checkpoint:
+registry, model artifacts, feature bank, and cached ResNet-18 checkpoint. The
+API must identify itself through `/health` as `development` or `test`; every
+other environment identity fails before the probe creates data:
 
 ```powershell
 docker compose up --build -d

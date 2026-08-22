@@ -4,13 +4,23 @@ import argparse
 import json
 import math
 import os
+import sys
 import time
 import uuid
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 from urllib import error, request
 
 from PIL import Image
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from app.contracts.inference import classify_anomaly_score
+
+SAFE_PROBE_ENVIRONMENTS = frozenset({"development", "test"})
 
 
 class InferenceGateError(RuntimeError):
@@ -147,10 +157,14 @@ def validate_health_checks(
     environment = service.get("environment")
     if not isinstance(environment, str) or not environment:
         raise InferenceGateError("Service health check has no environment identity.")
-    if environment.casefold() == "production":
+    normalized_environment = environment.casefold()
+    if (
+        environment != environment.strip()
+        or normalized_environment not in SAFE_PROBE_ENVIRONMENTS
+    ):
         raise InferenceGateError(
             "The production gate creates test users and data and must not run "
-            "against a production environment."
+            "outside an explicitly disposable development or test environment."
         )
     if database != {"status": "ok", "database": "connected"}:
         raise InferenceGateError("Database health check did not report connected.")
@@ -170,7 +184,35 @@ def validate_health_checks(
             raise InferenceGateError(
                 f"Model health check exposed private field {private_field}."
             )
-    return environment
+    return normalized_environment
+
+
+def _selected_model_identity(model: dict[str, Any]) -> tuple[str, str]:
+    model_version = model.get("model_version")
+    package_id = model.get("package_id")
+    if not isinstance(model_version, str) or not model_version:
+        raise InferenceGateError("Model health check has no model_version.")
+    if not isinstance(package_id, str) or not package_id:
+        raise InferenceGateError("Model health check has no package_id.")
+    return model_version, package_id
+
+
+def validate_selected_package_evidence(
+    *,
+    initial_model: dict[str, Any],
+    final_model: dict[str, Any],
+    result: dict[str, object],
+) -> None:
+    initial_identity = _selected_model_identity(initial_model)
+    final_identity = _selected_model_identity(final_model)
+    if final_identity != initial_identity:
+        raise InferenceGateError(
+            "The selected model changed during the deployed inference proof."
+        )
+    if result.get("package_id") != initial_identity[1]:
+        raise InferenceGateError(
+            "Completed prediction package does not match the selected package."
+        )
 
 
 def _register_and_login(base_url: str, *, role: str) -> str:
@@ -216,6 +258,17 @@ def validate_completed_prediction(payload: dict[str, Any]) -> dict[str, object]:
             raise InferenceGateError(f"Completed prediction has no numeric {field}.")
         if not math.isfinite(float(value)):
             raise InferenceGateError(f"Completed prediction has non-finite {field}.")
+
+    anomaly_score = float(payload["anomaly_score"])
+    threshold = float(payload["threshold"])
+    expected_label = classify_anomaly_score(
+        score=anomaly_score,
+        threshold=threshold,
+    ).value
+    if payload["predicted_label"] != expected_label:
+        raise InferenceGateError(
+            "Completed prediction label violates strict score > threshold semantics."
+        )
 
     latency_ms = payload.get("latency_ms")
     if isinstance(latency_ms, bool) or not isinstance(latency_ms, int):
@@ -348,7 +401,23 @@ def prove_real_inference(*, base_url: str, timeout_seconds: float) -> dict[str, 
         )
         status = prediction.get("status")
         if status == "completed":
-            return validate_completed_prediction(prediction)
+            summary = validate_completed_prediction(prediction)
+            final_model_health = _request_json(
+                method="GET",
+                url=f"{base_url}/health/model",
+                expected_status=200,
+            )
+            validate_health_checks(
+                service=service_health,
+                database=database_health,
+                model=final_model_health,
+            )
+            validate_selected_package_evidence(
+                initial_model=model_health,
+                final_model=final_model_health,
+                result=summary,
+            )
+            return summary
         if status == "failed":
             if prediction.get("failure_code") != "inference_failed":
                 raise InferenceGateError(
