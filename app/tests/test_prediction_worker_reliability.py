@@ -21,6 +21,8 @@ from app.workers.prediction_worker import (
     process_next_prediction,
 )
 
+pytestmark = pytest.mark.w7_production_gate
+
 
 @pytest.fixture(autouse=True)
 def reset_database() -> None:

@@ -19,6 +19,8 @@ from app.services.image_storage_service import (
 )
 from app.services.image_validation_service import ValidatedImage
 
+pytestmark = pytest.mark.w7_production_gate
+
 
 def _png_bytes() -> bytes:
     buffer = BytesIO()

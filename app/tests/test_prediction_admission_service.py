@@ -22,6 +22,8 @@ from app.services.prediction_admission_service import (
     PredictionUserOutstandingExceededError,
 )
 
+pytestmark = pytest.mark.w7_production_gate
+
 
 @pytest.fixture
 def session_factory() -> sessionmaker[Session]:

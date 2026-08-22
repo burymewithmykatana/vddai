@@ -40,6 +40,10 @@ documents:
     area: engineering
     kind: repository-intelligence
     status: current
+  - path: docs/engineering/production-readiness.md
+    area: engineering
+    kind: production-readiness
+    status: current
   - path: docs/decisions/0001-product-and-data-strategy.md
     area: decisions
     kind: architecture-decision

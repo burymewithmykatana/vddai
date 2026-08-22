@@ -26,6 +26,8 @@ from app.tests.model_package_fixtures import (
     write_package_fixture,
 )
 
+pytestmark = pytest.mark.w7_production_gate
+
 
 def create_loader(
     package: PackageFixture,

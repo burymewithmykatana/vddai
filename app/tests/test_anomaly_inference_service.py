@@ -17,6 +17,8 @@ from app.tests.model_package_fixtures import (
     write_package_fixture,
 )
 
+pytestmark = pytest.mark.w7_production_gate
+
 
 def write_image(path: Path) -> None:
     Image.new("RGB", (16, 16), color=(120, 80, 40)).save(path)

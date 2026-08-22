@@ -18,6 +18,8 @@ from app.contracts.inference import (
 from app.models.prediction import Prediction, PredictionStatus
 from app.schemas.prediction import PredictionRead
 
+pytestmark = pytest.mark.w7_production_gate
+
 
 def valid_lineage(
     *,
