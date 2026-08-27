@@ -35,7 +35,7 @@ queueing, or the frozen inference contract requires a separately approved plan.
 | Boundary | Required evidence |
 |---|---|
 | Authentication and ownership | Missing and invalid credentials return the stable `401`; inactive users return `403`; cross-owner single-record access remains the non-disclosing `404`; administrator read behavior remains explicit. |
-| Malformed and corrupt input | Missing, empty, invalid, mismatched, unsupported, and oversized uploads fail with the established safe status and create no prediction or retained object. |
+| Malformed and corrupt input | Missing, empty, invalid, mismatched, unsupported, encoded-oversized, and decoded-pixel-oversized uploads fail with the established safe status and create no prediction or retained object. Legacy stored over-limit inputs fail safely before decode-heavy worker processing. |
 | Storage and cleanup | Opaque keys cannot escape the configured root; database or admission failure after storage attempts deletion; cleanup failure is logged without replacing the original error. |
 | Admission and queue pressure | Per-user request and outstanding limits plus the global outstanding limit hold at boundaries and under PostgreSQL concurrency. |
 | Worker reliability | Claims use `SKIP LOCKED`; retry timing, lease recovery, attempt fencing, commit reconciliation, terminal cleanup, and nondisclosing failure behavior remain intact. |

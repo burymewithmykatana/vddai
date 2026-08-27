@@ -83,9 +83,13 @@ the human approval defined in the root instructions.
 
 ## Upload and Storage Boundary
 
-Uploaded files must remain size-limited, non-empty, content-decoded, restricted
-to the supported JPEG/PNG/WebP formats, consistent with their declared media
-type, and positive in width and height.
+Uploaded files must remain encoded-size-limited, decoded-pixel-limited,
+non-empty, content-decoded, restricted to the supported JPEG/PNG/WebP formats,
+consistent with their declared media type, and positive in width and height.
+The default and human-approved hard ceiling for the decoded-image budget is
+16,777,216 pixels; configuration may lower but never raise it. Over-limit
+uploads return the stable `413` before storage; legacy stored objects fail
+closed before decode-heavy preprocessing.
 
 Storage object keys are server-generated. API clients must not choose keys or
 destination paths. Public responses expose safe image metadata, not the opaque

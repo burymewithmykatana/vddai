@@ -142,6 +142,7 @@ JWT_SECRET_KEY=change-this-secret
 JWT_EXPIRE_MINUTES=60
 
 MAX_IMAGE_SIZE_MB=5
+MAX_IMAGE_PIXELS=16777216
 IMAGE_STORAGE_BACKEND=local
 IMAGE_STORAGE_ROOT=uploads
 PREDICTION_RATE_LIMIT_REQUESTS=10
@@ -185,6 +186,7 @@ The default effective limits are:
 | Limit | Default | Behavior at the boundary |
 |---|---:|---|
 | Upload file size | 5 MB | Exactly 5 MB is accepted; a larger file returns `413` |
+| Decoded image size | 16,777,216 pixels | Exactly the configured pixel budget is accepted; a larger image returns `413` before storage; configuration may lower but not raise this ceiling |
 | Requests per authenticated user | 10 per 60 seconds | Further requests return `429` until the fixed window resets |
 | Outstanding jobs per user | 5 | Further requests from that user return `429` |
 | Outstanding jobs service-wide | 50 | Further requests return `503` |
@@ -208,9 +210,17 @@ application memory. Starlette has already received and spooled the multipart
 file before the route runs, so this application guardrail is not a replacement
 for deployment-level request-body and temporary-storage limits.
 
-All limit values must be positive integers, and the global outstanding limit
-cannot be lower than the per-user limit. Invalid configuration fails during
-settings initialization. See
+Encoded byte size and decoded pixels are independent limits. Upload validation
+rejects over-budget dimensions before object storage, and shared preprocessing
+rechecks the same budget before EXIF transformation, RGB conversion, resize, or
+NumPy allocation. Pillow decompression-bomb warnings and errors fail closed.
+Legacy stored objects that exceed the budget become safe `inference_failed`
+predictions without retrying the same invalid input.
+
+All limit values must be positive integers. `MAX_IMAGE_PIXELS` may be lowered
+but cannot exceed the human-approved 16,777,216-pixel ceiling, and the global
+outstanding limit cannot be lower than the per-user limit. Invalid configuration
+fails during settings initialization. See
 [ADR 0011](docs/decisions/0011-database-backed-prediction-admission.md) for the
 transaction and concurrency contract.
 

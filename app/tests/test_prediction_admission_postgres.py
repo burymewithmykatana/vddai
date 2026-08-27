@@ -4,11 +4,14 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
+from fastapi import HTTPException
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.api.routes.auth import register_user
 from app.db.base import Base
 from app.models import Prediction, PredictionAdmissionControl, User
+from app.schemas.user import UserCreate
 from app.services.image_storage_service import StoredImage
 from app.services.prediction_admission_service import (
     PredictionAdmissionPolicy,
@@ -82,6 +85,54 @@ def _policy(*, user_limit: int, global_limit: int) -> PredictionAdmissionPolicy:
         global_outstanding_limit=global_limit,
         capacity_retry_after_seconds=5,
     )
+
+
+def test_postgres_duplicate_registration_race_returns_one_created_and_one_conflict(
+    postgres_engine: Engine,
+) -> None:
+    session_factory = sessionmaker(bind=postgres_engine)
+    first_lookup_barrier = threading.Barrier(2)
+    outcomes: list[int] = []
+    errors: list[BaseException] = []
+    credentials = UserCreate(
+        email="postgres-registration-race@example.com",
+        password="registration-race-password",
+    )
+
+    def register() -> None:
+        try:
+            with session_factory() as db:
+                real_scalar = db.scalar
+                first_lookup = True
+
+                def synchronized_scalar(*args: object, **kwargs: object):
+                    nonlocal first_lookup
+                    result = real_scalar(*args, **kwargs)
+                    if first_lookup:
+                        first_lookup = False
+                        first_lookup_barrier.wait(timeout=10)
+                    return result
+
+                db.scalar = synchronized_scalar  # type: ignore[method-assign]
+                try:
+                    register_user(credentials, db)
+                    outcomes.append(201)
+                except HTTPException as exc:
+                    outcomes.append(exc.status_code)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=register) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=15)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
+    assert sorted(outcomes) == [201, 409]
+    with session_factory() as db:
+        assert db.query(User).filter(User.email == credentials.email).count() == 1
 
 
 def test_postgres_user_lock_prevents_concurrent_rate_window_overshoot(

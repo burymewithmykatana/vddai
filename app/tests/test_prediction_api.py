@@ -45,6 +45,7 @@ from app.tests.model_package_fixtures import (
     ConstantFeatureExtractor,
     write_package_fixture,
 )
+from app.tests.image_fixtures import png_with_declared_dimensions
 from app.workers import prediction_worker
 from app.workers.prediction_worker import process_next_prediction, run_forever
 
@@ -1339,6 +1340,34 @@ def test_create_prediction_rejects_oversized_image(
 
     assert response.status_code == 413
     assert response.json()["detail"] == ("Image exceeds the maximum size of 1 MB.")
+
+
+def test_create_prediction_rejects_excessive_decoded_pixels_without_retention(
+    client: TestClient,
+    db: Session,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    object_store = configure_local_image_storage(monkeypatch, tmp_path / "objects")
+    monkeypatch.setattr(settings, "MAX_IMAGE_PIXELS", 16)
+
+    response = client.post(
+        "/predictions",
+        headers=auth_headers,
+        files=image_upload(
+            content=png_with_declared_dimensions(width=17, height=1),
+            filename="too-many-pixels.png",
+            content_type="image/png",
+        ),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == (
+        "Image exceeds the maximum decoded size of 16 pixels."
+    )
+    assert db.query(Prediction).count() == 0
+    assert not any(path.is_file() for path in object_store.root_directory.rglob("*"))
 
 
 def test_create_prediction_enforces_per_user_request_rate_with_retry_after(

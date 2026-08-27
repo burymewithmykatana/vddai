@@ -11,6 +11,8 @@ from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.prediction import Prediction, PredictionStatus
 from app.services.image_storage_service import ImageStorageError
+from app.services.image_preprocessing_service import ImagePreprocessingService
+from app.tests.image_fixtures import png_with_declared_dimensions
 from app.tests.test_prediction_api import create_model_lineage
 from app.workers import prediction_worker
 from app.workers.prediction_worker import (
@@ -72,15 +74,20 @@ def result_for(package_id: str, *, score: float = 1.0) -> AnomalyInferenceResult
 
 
 class MutableStorage:
-    def __init__(self, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        error: Exception | None = None,
+        contents: bytes = b"stored-image",
+    ) -> None:
         self.error = error
+        self.contents = contents
         self.read_count = 0
 
     def read(self, object_key: str) -> bytes:
         self.read_count += 1
         if self.error is not None:
             raise self.error
-        return b"stored-image"
+        return self.contents
 
 
 class DeterministicInferenceService:
@@ -92,6 +99,19 @@ class DeterministicInferenceService:
         assert image_contents == b"stored-image"
         self.predict_count += 1
         return self.result
+
+
+class PreprocessingOnlyInferenceService:
+    def __init__(self, *, max_input_pixels: int) -> None:
+        self.preprocessing_service = ImagePreprocessingService(
+            max_input_pixels=max_input_pixels
+        )
+        self.predict_count = 0
+
+    def predict(self, image_contents: bytes) -> AnomalyInferenceResult:
+        self.predict_count += 1
+        self.preprocessing_service.preprocess_bytes(image_contents)
+        raise AssertionError("Over-limit legacy input unexpectedly reached inference.")
 
 
 def test_prediction_retry_substate_preserves_public_processing_lifecycle() -> None:
@@ -278,6 +298,33 @@ def test_retry_exhaustion_becomes_terminal_failure(
     assert failed.error_message.startswith("RetryExhausted after 2 attempts:")
     assert failed.lease_expires_at is None
     assert failed.next_attempt_at is None
+
+
+def test_legacy_over_limit_stored_image_fails_safely_without_retry(
+    db: Session,
+) -> None:
+    prediction = create_prediction(
+        db,
+        created_at=datetime(2026, 8, 20, 10, 0, 0),
+    )
+    inference = PreprocessingOnlyInferenceService(max_input_pixels=16)
+    storage = MutableStorage(contents=png_with_declared_dimensions(width=17, height=1))
+
+    assert not process_next_prediction(
+        db,
+        inference_service=inference,
+        storage_service=storage,
+        retry_policy=PredictionRetryPolicy(3, 5, 60),
+    )
+
+    db.expire_all()
+    failed = db.get(Prediction, prediction.id)
+    assert failed is not None
+    assert failed.status == PredictionStatus.FAILED.value
+    assert failed.failure_code == "inference_failed"
+    assert failed.attempt_count == 1
+    assert failed.error_message.startswith("ImagePreprocessingError:")
+    assert inference.predict_count == 1
 
 
 def test_lowered_retry_limit_fails_due_retry_without_another_attempt(

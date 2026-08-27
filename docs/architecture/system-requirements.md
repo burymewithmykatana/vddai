@@ -14,10 +14,13 @@ public benchmark results.
 ## Functional Requirements
 
 - Authenticate users with bearer JWTs and reject inactive users.
-- Accept size-limited JPEG, PNG, and WebP uploads after structural decoding and
-  media-type validation.
+- Accept encoded-size-limited and decoded-pixel-limited JPEG, PNG, and WebP
+  uploads after structural decoding and media-type validation.
 - Bound application upload reads to the configured maximum plus one byte and
   reject oversized uploads before image decoding or storage.
+- Reject images above the configured decoded-pixel budget before object storage
+  and before decode-heavy online or offline preprocessing. Permit configuration
+  to lower but never raise the approved 16,777,216-pixel ceiling.
 - Rate-limit authenticated prediction submissions per user and cap per-user
   and service-wide outstanding work with explicit retryable failures.
 - Generate opaque server-controlled image object keys and owner-scoped
