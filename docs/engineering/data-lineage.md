@@ -143,6 +143,15 @@ Generated files are written under `data/metadata`, including:
 Image preprocessing is implemented in
 `app/services/image_preprocessing_service.py` and reused by the dataset code.
 
+Before EXIF transformation, RGB conversion, resize, or NumPy allocation, the
+shared service rejects source images above the configured decoded-pixel budget.
+The budget defaults to and cannot exceed the approved 16,777,216-pixel ceiling;
+operators may lower it. The authenticated upload validator applies the same
+budget before object storage. This resource boundary changes which source
+images are accepted, but it does not change the preprocessing schema or tensor
+values for accepted inputs; existing artifacts remain compatible when every
+source image is within the budget.
+
 For each image, the service:
 
 1. opens the file with Pillow;

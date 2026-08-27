@@ -3,6 +3,8 @@ from typing import Literal
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+MAX_IMAGE_PIXELS_HARD_LIMIT = 16_777_216
+
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "vddai-backend"
@@ -15,6 +17,11 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 60
 
     MAX_IMAGE_SIZE_MB: int = Field(default=5, ge=1)
+    MAX_IMAGE_PIXELS: int = Field(
+        default=MAX_IMAGE_PIXELS_HARD_LIMIT,
+        ge=1,
+        le=MAX_IMAGE_PIXELS_HARD_LIMIT,
+    )
     IMAGE_STORAGE_BACKEND: Literal["local"] = "local"
     IMAGE_STORAGE_ROOT: str = "uploads"
 

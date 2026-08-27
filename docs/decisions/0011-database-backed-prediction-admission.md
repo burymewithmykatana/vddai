@@ -1,6 +1,6 @@
 # ADR 0011 — Database-Backed Prediction Admission
 
-- Status: Accepted
+- Status: Accepted; amended 2026-08-25
 - Date: 2026-08-21
 - Migration revision: `20260821_04`
 
@@ -29,6 +29,29 @@ closed on every path.
 This bounds application-memory consumption after FastAPI supplies the
 `UploadFile`. It does not replace deployment-level request-body or temporary
 spool limits because multipart receipt occurs before route execution.
+
+### Decoded-image resource boundary — 2026-08-25 amendment
+
+Encoded byte size does not bound decoded image size. The authenticated upload
+validator and the shared online/offline preprocessing service therefore enforce
+one positive `MAX_IMAGE_PIXELS` budget. The approved default and hard ceiling
+are 16,777,216 decoded pixels; configuration may lower but never raise that
+ceiling. Exactly the configured budget is accepted; a larger source is rejected
+before object storage and before EXIF, RGB conversion, resize, or NumPy
+allocation.
+
+Upload rejection returns the same non-retryable `413` class used for encoded
+oversize, with a public-safe decoded-size detail and no stored object or queued
+prediction. A legacy stored object or offline source that exceeds the budget
+fails closed through `ImagePreprocessingError`; the worker persists only the
+stable public `inference_failed` code. Pillow decompression-bomb warnings and
+errors are translated into those controlled outcomes.
+
+This is an input resource and security boundary. It does not change EXIF,
+color, resize, layout, dtype, normalization, model input, inference, or artifact
+schema behavior for accepted images. Existing artifacts remain compatible when
+their source images are within the budget; no artifact regeneration is required
+for the MVTec AD `tile` pilot contract.
 
 ### Request-frequency state
 
@@ -65,6 +88,7 @@ but cannot cause admission overshoot.
 | Setting | Default | Constraint |
 |---|---:|---|
 | `MAX_IMAGE_SIZE_MB` | `5` | Positive integer |
+| `MAX_IMAGE_PIXELS` | `16777216` | Integer from `1` through the approved `16777216` hard ceiling |
 | `PREDICTION_RATE_LIMIT_REQUESTS` | `10` | Positive integer |
 | `PREDICTION_RATE_LIMIT_WINDOW_SECONDS` | `60` | Positive integer |
 | `PREDICTION_USER_OUTSTANDING_LIMIT` | `5` | Positive integer |
@@ -103,15 +127,20 @@ prediction status remain unchanged.
   an intentional v0.1 correctness-over-throughput tradeoff.
 - Rate state is bounded to one row per user and is deleted with that user.
 - Stale processing work continues to consume capacity until ADR 0010 recovery.
+- Encoded-size and decoded-pixel limits jointly bound application-controlled
+  upload and preprocessing work; ingress request-body and spool limits remain
+  separately required.
 - Redis queueing, distributed locks, request deduplication, public idempotency
   keys, workflow engines, and deployment-level body limits remain out of scope.
 
 ## Verification
 
-Permanent tests cover exact upload-size boundaries, bounded reads, rate-window
-reset and retry hints, per-user and global capacity, status counting,
-administrator behavior, object cleanup, configuration validation, migration
-preservation, and PostgreSQL simultaneous request/admission serialization.
+Permanent tests cover exact encoded-size and decoded-pixel boundaries, bounded
+reads, Pillow decompression-bomb handling, legacy-object worker failure,
+rate-window reset and retry hints, per-user and global capacity, status
+counting, administrator behavior, object cleanup, configuration validation,
+migration preservation, and PostgreSQL simultaneous request/admission
+serialization.
 
 ## Related Decisions
 

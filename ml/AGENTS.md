@@ -92,6 +92,9 @@ count.
 The active shared image contract is implemented by
 `app.services.image_preprocessing_service`:
 
+- reject source images above the configured decoded-pixel budget, whose default
+  and hard ceiling are 16,777,216 pixels, before EXIF, color-conversion, resize,
+  or NumPy allocation work;
 - apply EXIF orientation;
 - convert to RGB;
 - resize directly to the configured exact size using bilinear interpolation;
@@ -113,6 +116,12 @@ Any change to size, interpolation, crop policy, orientation, color space,
 layout, dtype, numeric range, normalization ownership, or mask semantics is a
 versioned compatibility change. Update online/offline tests together and
 identify every artifact that must be regenerated.
+
+The decoded-pixel budget is an input resource boundary, not a pixel-transform
+or artifact-schema field. Changing that security policy still requires human
+approval and coordinated online/offline tests and documentation. It does not
+invalidate artifacts whose source images remain within the approved budget.
+Configuration may lower the budget but must not exceed the approved ceiling.
 
 ## Reproducibility Claims
 

@@ -18,6 +18,7 @@ from app.services.image_storage_service import (
     StoredObject,
 )
 from app.services.image_validation_service import ValidatedImage
+from app.tests.image_fixtures import png_with_declared_dimensions
 
 pytestmark = pytest.mark.w7_production_gate
 
@@ -229,3 +230,78 @@ def test_store_rejects_reported_oversize_without_reading(
 
     assert getattr(exc_info.value, "status_code", None) == 413
     assert buffer.requested_sizes == []
+
+
+def test_store_accepts_exact_decoded_pixel_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "MAX_IMAGE_PIXELS", 16)
+    object_store = RecordingObjectStore()
+    service = ImageStorageService(object_store)
+    upload = UploadFile(
+        file=BytesIO(png_with_declared_dimensions(width=4, height=4)),
+        filename="boundary.png",
+        headers=Headers({"content-type": "image/png"}),
+    )
+
+    stored = service.store(upload)
+
+    assert stored.width == 4
+    assert stored.height == 4
+    assert object_store.contents is not None
+
+
+def test_store_rejects_decoded_pixel_limit_plus_one_without_writing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "MAX_IMAGE_PIXELS", 16)
+    object_store = RecordingObjectStore()
+    service = ImageStorageService(object_store)
+    upload = UploadFile(
+        file=BytesIO(png_with_declared_dimensions(width=17, height=1)),
+        filename="too-many-pixels.png",
+        headers=Headers({"content-type": "image/png"}),
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        service.store(upload)
+
+    assert getattr(exc_info.value, "status_code", None) == 413
+    assert getattr(exc_info.value, "detail", None) == (
+        "Image exceeds the maximum decoded size of 16 pixels."
+    )
+    assert object_store.contents is None
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [
+        (10_000, 10_000),
+        (20_000, 10_000),
+    ],
+)
+def test_store_converts_pillow_decompression_bomb_signal_to_safe_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+    width: int,
+    height: int,
+) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "MAX_IMAGE_PIXELS", 16_777_216)
+    object_store = RecordingObjectStore()
+    service = ImageStorageService(object_store)
+    upload = UploadFile(
+        file=BytesIO(png_with_declared_dimensions(width=width, height=height)),
+        filename="compressed-bomb.png",
+        headers=Headers({"content-type": "image/png"}),
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        service.store(upload)
+
+    assert getattr(exc_info.value, "status_code", None) == 413
+    assert object_store.contents is None

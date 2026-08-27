@@ -5,7 +5,7 @@ import sqlalchemy as sa
 from pydantic import ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import Settings
+from app.core.config import MAX_IMAGE_PIXELS_HARD_LIMIT, Settings
 from app.db.base import Base
 from app.models import (
     Prediction,
@@ -202,14 +202,28 @@ def test_settings_define_defaults_and_reject_invalid_guardrails() -> None:
     configured = Settings(_env_file=None)
 
     assert configured.MAX_IMAGE_SIZE_MB == 5
+    assert configured.MAX_IMAGE_PIXELS == 16_777_216
     assert configured.PREDICTION_RATE_LIMIT_REQUESTS == 10
     assert configured.PREDICTION_RATE_LIMIT_WINDOW_SECONDS == 60
     assert configured.PREDICTION_USER_OUTSTANDING_LIMIT == 5
     assert configured.PREDICTION_GLOBAL_OUTSTANDING_LIMIT == 50
     assert configured.PREDICTION_CAPACITY_RETRY_AFTER_SECONDS == 5
 
+    maximum_pixel_configuration = Settings(
+        _env_file=None,
+        MAX_IMAGE_PIXELS=MAX_IMAGE_PIXELS_HARD_LIMIT,
+    )
+    assert maximum_pixel_configuration.MAX_IMAGE_PIXELS == MAX_IMAGE_PIXELS_HARD_LIMIT
+
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            MAX_IMAGE_PIXELS=MAX_IMAGE_PIXELS_HARD_LIMIT + 1,
+        )
+
     for field_name in (
         "MAX_IMAGE_SIZE_MB",
+        "MAX_IMAGE_PIXELS",
         "PREDICTION_RATE_LIMIT_REQUESTS",
         "PREDICTION_RATE_LIMIT_WINDOW_SECONDS",
         "PREDICTION_USER_OUTSTANDING_LIMIT",

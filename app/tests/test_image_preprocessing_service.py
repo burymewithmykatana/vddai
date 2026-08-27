@@ -1,15 +1,17 @@
+from collections.abc import Generator
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from collections.abc import Generator
 
 import numpy as np
 import pytest
 from PIL import Image
 
+from app.core.config import MAX_IMAGE_PIXELS_HARD_LIMIT
 from app.services.image_preprocessing_service import (
     ImagePreprocessingError,
     ImagePreprocessingService,
 )
+from app.tests.image_fixtures import png_with_declared_dimensions
 
 
 @pytest.fixture
@@ -172,3 +174,66 @@ def test_preprocessing_service_rejects_invalid_target_dimensions(
             target_width=target_width,
             target_height=target_height,
         )
+
+
+def test_preprocess_accepts_exact_decoded_pixel_boundary(
+    local_tmp_path: Path,
+) -> None:
+    image_path = local_tmp_path / "boundary.png"
+    create_test_image(image_path, size=(4, 4))
+    service = ImagePreprocessingService(
+        target_width=4,
+        target_height=4,
+        max_input_pixels=16,
+    )
+
+    result = service.preprocess(image_path)
+
+    assert result.original_width == 4
+    assert result.original_height == 4
+
+
+def test_preprocess_rejects_decoded_pixel_limit_plus_one_before_decode(
+    local_tmp_path: Path,
+) -> None:
+    image_path = local_tmp_path / "too-many-pixels.png"
+    image_path.write_bytes(png_with_declared_dimensions(width=17, height=1))
+    service = ImagePreprocessingService(max_input_pixels=16)
+
+    with pytest.raises(ImagePreprocessingError, match="maximum decoded size"):
+        service.preprocess(image_path)
+
+
+def test_preprocess_converts_pillow_decompression_bomb_warning_to_failure() -> None:
+    service = ImagePreprocessingService(max_input_pixels=16_777_216)
+
+    with pytest.raises(ImagePreprocessingError, match="maximum decoded size"):
+        service.preprocess_bytes(
+            png_with_declared_dimensions(width=10_000, height=10_000)
+        )
+
+
+def test_preprocessing_service_rejects_invalid_maximum_input_pixels() -> None:
+    for invalid_value in (
+        True,
+        0,
+        -1,
+        1.5,
+        MAX_IMAGE_PIXELS_HARD_LIMIT + 1,
+    ):
+        with pytest.raises(
+            ValueError,
+            match="Maximum input pixels must be an integer between 1 and",
+        ):
+            ImagePreprocessingService(
+                max_input_pixels=invalid_value  # type: ignore[arg-type]
+            )
+
+
+def test_approved_pixel_ceiling_precedes_pillow_bomb_warning_threshold() -> None:
+    assert Image.MAX_IMAGE_PIXELS is not None
+    assert MAX_IMAGE_PIXELS_HARD_LIMIT <= Image.MAX_IMAGE_PIXELS
+
+    service = ImagePreprocessingService(max_input_pixels=MAX_IMAGE_PIXELS_HARD_LIMIT)
+
+    assert service.max_input_pixels == MAX_IMAGE_PIXELS_HARD_LIMIT
