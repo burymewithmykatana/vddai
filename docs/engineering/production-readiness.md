@@ -42,7 +42,7 @@ queueing, or the frozen inference contract requires a separately approved plan.
 | Model dependencies | Missing or invalid registry/package state fails closed; selected package identity and public health output reveal no internal paths. |
 | Real inference | A disposable deployed stack completes authenticated upload, PostgreSQL queueing, local storage retrieval, selected-package inference, atomic persistence, and owner readback. |
 | Migrations | PostgreSQL 16 preserves representative legacy data across Alembic upgrade to head, downgrade to base, and re-upgrade to head in an isolated temporary schema. |
-| Repository quality | Pinned dependencies, documentation validation, applicable formatting, full pytest, Docker Compose configuration, and complete diff inspection pass. |
+| Repository quality | Pinned dependencies, documentation validation, one Alembic head, changed-Python formatting, full pytest with PostgreSQL 16, Docker Compose configuration, application-image build, and complete diff inspection pass. |
 
 The `w7_production_gate` pytest marker selects the permanent regression suite.
 `VDDAI_TEST_POSTGRES_DATABASE_URL` must point to an explicitly disposable
@@ -50,8 +50,34 @@ PostgreSQL 16 database. The PostgreSQL tests create UUID-named schemas and drop
 only those schemas, but the database must still never be a production target.
 `scripts/run_production_gate.py` is the authoritative entry point: it blocks
 before pytest when the URL is absent and returns a failed result if any required
-PostgreSQL test is missing or skipped. Running the marker directly retains the
-canonical suite's optional-PostgreSQL behavior and is not a W7D4 verdict.
+PostgreSQL test is missing or skipped. Its required inventory names all seven
+current PostgreSQL concurrency and migration tests, while every new test carrying
+both gate markers also becomes mandatory. Running the marker directly retains
+the canonical suite's optional-PostgreSQL behavior and is not a W7D4 verdict.
+
+## Hosted W8D1 quality gate
+
+`.github/workflows/ci.yml` is the authoritative hosted merge-quality gate for
+pull requests, `master` pushes, and manual dispatches. It provisions an
+ephemeral PostgreSQL 16 service and runs the complete canonical suite without
+the default PostgreSQL skips, then runs `scripts/run_production_gate.py` as the
+strict W7D4 regression verdict. The same mandatory job validates exact Python,
+pip, and requirement pins, documentation, one Alembic head, Black formatting
+for Python files added or changed in the Git comparison, and Docker Compose
+configuration. A separate mandatory job builds the application image without
+publishing it.
+
+The stable aggregate check is `VDDAI v0.1.0 quality gate`. It succeeds only when
+both required jobs report `success`; failure, skip, cancellation, timeout, or
+unavailable evidence remains non-green. The workflow has read-only repository
+permission and uses no production secret, GitHub environment, registry
+credential, or production infrastructure.
+
+Hosted CI does not provision ignored registry, package, feature-bank, or model
+weight files and does not run the data-creating deployed probe. The deployed
+real-inference proof remains environment-specific release evidence. CI success
+does not make the full W7D4 release outcome green by itself and never authorizes
+merge, release, deployment, or model promotion.
 
 ## Required commands
 
@@ -62,7 +88,7 @@ $env:VDDAI_TEST_POSTGRES_DATABASE_URL = "<disposable-postgresql-16-url>"
 python scripts/run_production_gate.py
 python -m pytest -q app/tests/test_prove_real_inference.py
 python scripts/validate_docs.py
-.\scripts\verify.ps1 -IncludeDockerConfig
+.\scripts\verify.ps1 -IncludeFormatting -IncludeDockerConfig
 ```
 
 With a disposable Docker stack and the selected package, feature bank, and

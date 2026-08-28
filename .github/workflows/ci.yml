@@ -15,19 +15,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Python and Docker verification
-    runs-on: ubuntu-latest
+  verification:
+    name: Repository and production verification
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
 
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PYTHONDONTWRITEBYTECODE: "1"
+      VDDAI_TEST_POSTGRES_DATABASE_URL: >-
+        postgresql+psycopg://vddai_ci:vddai_ci_password@127.0.0.1:5432/vddai_ci
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vddai_ci
+          POSTGRES_PASSWORD: vddai_ci_password
+          POSTGRES_DB: vddai_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vddai_ci -d vddai_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python 3.14.3
@@ -42,17 +60,74 @@ jobs:
           python -m pip install --upgrade "pip==26.1.2"
           python -m pip install --requirement requirements.txt
 
-      - name: Validate installed dependencies
-        run: python -m pip check
+      - name: Resolve changed-file formatting range
+        id: formatting-range
+        shell: bash
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            pull_request)
+              base="${{ github.event.pull_request.base.sha }}"
+              ;;
+            push)
+              base="${{ github.event.before }}"
+              ;;
+            *)
+              if ! base="$(git rev-parse "${GITHUB_SHA}^" 2>/dev/null)"; then
+                base="0000000000000000000000000000000000000000"
+              fi
+              ;;
+          esac
+          echo "base=${base}" >> "${GITHUB_OUTPUT}"
 
-      - name: Validate documentation architecture
-        run: python scripts/validate_docs.py
+      - name: Prepare disposable Compose configuration
+        shell: pwsh
+        run: Copy-Item -LiteralPath .env.example -Destination .env
 
-      - name: Validate Alembic revision graph
-        run: python -m alembic heads
+      - name: Run authoritative repository verification
+        shell: pwsh
+        run: |
+          ./scripts/verify.ps1 `
+            -PythonCommand python `
+            -IncludeFormatting `
+            -FormattingBase "${{ steps.formatting-range.outputs.base }}" `
+            -FormattingHead "${{ github.sha }}" `
+            -IncludeDockerConfig
 
-      - name: Run complete test suite
-        run: python -m pytest -q
+      - name: Run strict W7D4 production and reliability gate
+        run: python scripts/run_production_gate.py
 
-      - name: Build application image
+  image:
+    name: Application image build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build application image without publishing
         run: docker build --tag "vddai-ci:${GITHUB_SHA}" .
+
+  quality-gate:
+    name: VDDAI v0.1.0 quality gate
+    if: ${{ always() }}
+    needs:
+      - verification
+      - image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+
+    steps:
+      - name: Require every upstream quality job to pass
+        env:
+          VERIFICATION_RESULT: ${{ needs.verification.result }}
+          IMAGE_RESULT: ${{ needs.image.result }}
+        run: |
+          if [ "${VERIFICATION_RESULT}" != "success" ] || [ "${IMAGE_RESULT}" != "success" ]; then
+            echo "Required quality job failed: verification=${VERIFICATION_RESULT}, image=${IMAGE_RESULT}" >&2
+            exit 1
+          fi
+          echo "All required VDDAI v0.1.0 quality jobs passed."

@@ -7,6 +7,24 @@ from collections.abc import Mapping
 import pytest
 
 POSTGRES_DATABASE_URL_ENV = "VDDAI_TEST_POSTGRES_DATABASE_URL"
+REQUIRED_POSTGRES_NODEIDS = frozenset(
+    {
+        "app/tests/test_prediction_admission_postgres.py::"
+        "test_postgres_duplicate_registration_race_returns_one_created_and_one_conflict",
+        "app/tests/test_prediction_admission_postgres.py::"
+        "test_postgres_user_lock_prevents_concurrent_rate_window_overshoot",
+        "app/tests/test_prediction_admission_postgres.py::"
+        "test_postgres_singleton_lock_prevents_per_user_admission_overshoot",
+        "app/tests/test_prediction_admission_postgres.py::"
+        "test_postgres_singleton_lock_prevents_global_admission_overshoot",
+        "app/tests/test_prediction_worker_postgres.py::"
+        "test_postgres_skip_locked_prevents_concurrent_claim",
+        "app/tests/test_prediction_worker_postgres.py::"
+        "test_postgres_recovery_fences_expired_worker_result",
+        "app/tests/test_production_gate_postgres.py::"
+        "test_postgres_migration_upgrade_downgrade_reupgrade_preserves_legacy_data",
+    }
+)
 
 
 class RequiredPostgresEvidencePlugin:
@@ -14,6 +32,7 @@ class RequiredPostgresEvidencePlugin:
 
     def __init__(self) -> None:
         self.required_nodeids: set[str] = set()
+        self.missing_expected_nodeids: set[str] = set(REQUIRED_POSTGRES_NODEIDS)
         self.observed_nodeids: set[str] = set()
         self.skipped_nodeids: set[str] = set()
 
@@ -24,6 +43,9 @@ class RequiredPostgresEvidencePlugin:
             if item.get_closest_marker("w7_production_gate") is not None
             and item.get_closest_marker("postgres_integration") is not None
         }
+        self.missing_expected_nodeids = (
+            REQUIRED_POSTGRES_NODEIDS - self.required_nodeids
+        )
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         if report.nodeid not in self.required_nodeids:
@@ -36,6 +58,11 @@ class RequiredPostgresEvidencePlugin:
         reasons: list[str] = []
         if not self.required_nodeids:
             reasons.append("no required PostgreSQL integration tests were collected")
+        if self.missing_expected_nodeids:
+            reasons.append(
+                "required PostgreSQL tests were not collected: "
+                + ", ".join(sorted(self.missing_expected_nodeids))
+            )
         missing = self.required_nodeids - self.observed_nodeids
         if missing:
             reasons.append(

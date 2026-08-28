@@ -78,6 +78,7 @@ List only commands that were actually executed.
 | Command | Result |
 |---|---|
 | `.\scripts\verify.ps1` | pass/fail/not run — details |
+| `CI / VDDAI v0.1.0 quality gate` | pass/fail/not run — head SHA and run link |
 | Focused tests | pass/fail/not run — details |
 | Migration checks | pass/fail/not applicable — details |
 | Docker checks | pass/fail/not applicable — details |

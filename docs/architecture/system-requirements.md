@@ -90,8 +90,13 @@ public benchmark results.
 - Support local development and the documented Docker Compose stack.
 - Provide a traversal-safe local image-storage backend while keeping API and
   worker orchestration compatible with a future object-storage backend.
-- Validate dependencies, documentation structure, tests, and Compose wiring
-  through the repository verification gate.
+- Validate exact dependency versions, documentation structure, one Alembic
+  head, changed-Python formatting, the complete test suite with PostgreSQL 16,
+  strict production-regression evidence, Compose wiring, and application-image
+  construction through the hosted repository quality gate.
+- Treat failed, skipped, canceled, timed-out, or unavailable mandatory CI
+  evidence as non-green. CI success remains evidence for human review and does
+  not authorize merge, release, deployment, or model promotion.
 - Fail during configuration initialization when upload, rate, outstanding, or
   retry-hint limits are non-positive or globally inconsistent.
 - Keep generated datasets, feature banks, thresholds, evaluation runs, model
