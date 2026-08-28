@@ -8,7 +8,11 @@ pytestmark = pytest.mark.w7_production_gate
 
 
 class MarkedItem:
-    nodeid = "app/tests/test_postgres.py::test_required"
+    def __init__(
+        self,
+        nodeid: str = sorted(run_production_gate.REQUIRED_POSTGRES_NODEIDS)[0],
+    ) -> None:
+        self.nodeid = nodeid
 
     @staticmethod
     def get_closest_marker(name: str) -> object | None:
@@ -72,9 +76,10 @@ def test_required_postgres_plugin_blocks_skipped_evidence(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     plugin = run_production_gate.RequiredPostgresEvidencePlugin()
-    plugin.pytest_collection_modifyitems([MarkedItem()])  # type: ignore[list-item]
+    marked_item = MarkedItem()
+    plugin.pytest_collection_modifyitems([marked_item])  # type: ignore[list-item]
     plugin.pytest_runtest_logreport(  # type: ignore[arg-type]
-        SimpleNamespace(nodeid=MarkedItem.nodeid, skipped=True)
+        SimpleNamespace(nodeid=marked_item.nodeid, skipped=True)
     )
     session = SimpleNamespace(
         config=SimpleNamespace(
@@ -85,9 +90,10 @@ def test_required_postgres_plugin_blocks_skipped_evidence(
 
     plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)  # type: ignore[arg-type]
 
-    assert plugin.blocked_reasons() == [
-        "required PostgreSQL tests skipped: " + MarkedItem.nodeid
-    ]
+    assert any(
+        reason == "required PostgreSQL tests skipped: " + marked_item.nodeid
+        for reason in plugin.blocked_reasons()
+    )
     assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
     assert "BLOCKED" in capsys.readouterr().err
 
@@ -95,6 +101,29 @@ def test_required_postgres_plugin_blocks_skipped_evidence(
 def test_required_postgres_plugin_blocks_missing_collection() -> None:
     plugin = run_production_gate.RequiredPostgresEvidencePlugin()
 
-    assert plugin.blocked_reasons() == [
-        "no required PostgreSQL integration tests were collected"
+    reasons = plugin.blocked_reasons()
+
+    assert "no required PostgreSQL integration tests were collected" in reasons
+    assert any(
+        reason.startswith("required PostgreSQL tests were not collected:")
+        for reason in reasons
+    )
+
+
+def test_required_postgres_plugin_blocks_when_one_expected_test_disappears() -> None:
+    missing_nodeid = sorted(run_production_gate.REQUIRED_POSTGRES_NODEIDS)[0]
+    collected = [
+        MarkedItem(nodeid)
+        for nodeid in run_production_gate.REQUIRED_POSTGRES_NODEIDS
+        if nodeid != missing_nodeid
     ]
+    plugin = run_production_gate.RequiredPostgresEvidencePlugin()
+
+    plugin.pytest_collection_modifyitems(collected)  # type: ignore[arg-type]
+
+    assert plugin.missing_expected_nodeids == {missing_nodeid}
+    assert any(
+        missing_nodeid in reason
+        for reason in plugin.blocked_reasons()
+        if reason.startswith("required PostgreSQL tests were not collected:")
+    )

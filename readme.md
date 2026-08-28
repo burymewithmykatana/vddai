@@ -49,7 +49,7 @@ the host, change the database and Redis hosts to `localhost` as described in
 | Data contract | Validated MVTec AD `tile` ingestion, deterministic splits and fingerprints, mask handling, and shared offline/online preprocessing |
 | Model baseline | Frozen ResNet-18 features, exact Euclidean nearest-neighbor scoring, and a validation-only frozen threshold |
 | Production inference | Fail-closed package loading, checksum and lineage validation, worker-side inference, bounded retries, lease recovery, fenced lifecycle persistence, and safe failures |
-| Verification | Canonical gate with 340 tests, including 6 explicit PostgreSQL 16 concurrency and migration tests; the W7D4 production marker selects 161 cross-boundary tests |
+| Verification | Canonical gate with 362 tests, including 7 explicit PostgreSQL 16 concurrency and migration tests; the W7D4 production marker selects 171 cross-boundary tests |
 
 ## Project Goal
 
@@ -384,12 +384,14 @@ python scripts/run_production_gate.py
 
 PostgreSQL tests create UUID-named schemas and remove only those schemas. A
 missing URL, skipped PostgreSQL test, or missing required PostgreSQL test makes
-the strict runner fail. Running the pytest marker directly retains optional
-PostgreSQL skips and is not a W7D4 verdict. The URL must never target a
-production database. Run the deployed proof after provisioning the ignored
-registry, model artifacts, feature bank, and cached ResNet-18 checkpoint. The
-API must identify itself through `/health` as `development` or `test`; every
-other environment identity fails before the probe creates data:
+the strict runner fail. The runner also requires the exact seven maintained
+PostgreSQL concurrency and migration tests, so removing one cannot silently
+shrink the gate. Running the pytest marker directly retains optional PostgreSQL
+skips and is not a W7D4 verdict. The URL must never target a production
+database. Run the deployed proof after provisioning the ignored registry,
+model artifacts, feature bank, and cached ResNet-18 checkpoint. The API must
+identify itself through `/health` as `development` or `test`; every other
+environment identity fails before the probe creates data:
 
 ```powershell
 docker compose up --build -d
@@ -417,6 +419,27 @@ To intentionally delete the local PostgreSQL development volume as well:
 ```powershell
 docker compose down -v
 ```
+
+### W8D1 GitHub Actions Quality Gate
+
+GitHub Actions runs the `CI` workflow for pull requests, pushes to `master`,
+and manual dispatches. Its mandatory repository-verification job installs the
+pinned Python environment, checks exact dependency versions, documentation,
+one Alembic head, Black formatting for added or changed Python files, the full
+test suite with ephemeral PostgreSQL 16, the strict W7D4 gate, and Docker
+Compose configuration. A separate mandatory job builds the application image
+without publishing it.
+
+`VDDAI v0.1.0 quality gate` is the stable aggregate check intended for future
+branch protection. It is green only when both mandatory upstream jobs succeed;
+a failure, skip, cancellation, or timeout is not accepted. The workflow uses
+read-only repository permissions, test-only PostgreSQL credentials, and no
+production secret, environment, registry credential, or infrastructure.
+
+CI does not provision the ignored model registry, package, feature bank, or
+ResNet-18 checkpoint and therefore does not claim the deployed real-inference
+proof above. A green CI result is merge-quality evidence only; it does not
+approve merge, release, deployment, or model promotion.
 
 ## Image Preprocessing Contract
 

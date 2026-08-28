@@ -2,7 +2,9 @@
 param(
     [string]$PythonCommand = "",
     [switch]$IncludeFormatting,
-    [switch]$IncludeDockerConfig
+    [switch]$IncludeDockerConfig,
+    [string]$FormattingBase = "",
+    [string]$FormattingHead = "HEAD"
 )
 
 Set-StrictMode -Version Latest
@@ -165,16 +167,24 @@ try {
         "scripts/validate_docs.py"
     )
 
+    Invoke-NativeCommand -FilePath $PythonCommand -Arguments @(
+        "scripts/validate_alembic.py"
+    )
+
     if ($IncludeFormatting) {
-        Invoke-NativeCommand -FilePath $PythonCommand -Arguments @(
-            "-m",
-            "black",
-            "--check",
-            "."
-        )
+        $FormattingArguments = @("scripts/validate_python_formatting.py")
+        if (-not [string]::IsNullOrWhiteSpace($FormattingBase)) {
+            $FormattingArguments += @(
+                "--base",
+                $FormattingBase,
+                "--head",
+                $FormattingHead
+            )
+        }
+        Invoke-NativeCommand -FilePath $PythonCommand -Arguments $FormattingArguments
     }
     else {
-        Write-Host "Formatting check skipped. Use -IncludeFormatting when the task requires it."
+        Write-Host "Changed-Python formatting check skipped. Use -IncludeFormatting when the task requires it."
     }
 
     Invoke-NativeCommand -FilePath $PythonCommand -Arguments @(

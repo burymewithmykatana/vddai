@@ -255,11 +255,14 @@ The canonical default gate is:
 .\scripts\verify.ps1
 ```
 
-It validates installed dependencies and runs the complete test suite. Use
+It validates installed dependencies, documentation, the single-head Alembic
+revision graph, and the complete test suite. Use
 `.\scripts\verify.ps1 -IncludeDockerConfig` when Compose configuration is in
 scope. Formatting remains an explicit check because the current repository has
 pre-existing Black baseline drift; do not hide that drift or reformat unrelated
-files as part of another task.
+files as part of another task. `-IncludeFormatting` checks only staged,
+unstaged, and untracked Python files locally; CI supplies an explicit base/head
+range and checks every Python file added or changed by that range.
 
 The canonical gate also runs:
 
@@ -281,7 +284,7 @@ python -m pytest -q
 For formatting-relevant Python changes:
 
 ```powershell
-python -m black --check .
+python scripts/validate_python_formatting.py
 ```
 
 For database changes, configure a reachable test/development database first,
