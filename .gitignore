@@ -1,6 +1,5 @@
 .venv/
 node_modules/
-.paperclip/
 __pycache__/
 *.pyc
 .env
@@ -43,6 +42,7 @@ data/metadata/*.generated.json
 data/metadata/*.generated.csv
 
 .pytest_tmp/
+.w8d2-image.iid
 
 # Generated local Graphify repository intelligence
 graphify-out/

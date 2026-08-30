@@ -17,6 +17,7 @@ detector tied to one product category.
 |---|---|
 | Run the API on my machine | [Local development](#local-development-api-on-the-host) |
 | Run the complete stack | [Docker development](#docker-development-all-services) |
+| Run a reviewed immutable image | [Immutable image runtime](#w8d2-immutable-image-runtime) |
 | Configure the real model package | [Configuration](#configuration) and [Week 5 production inference](#week-5-production-inference) |
 | Understand prediction retries and recovery | [Prediction reliability and recovery](#prediction-reliability-and-recovery) and [ADR 0010](docs/decisions/0010-database-backed-prediction-reliability.md) |
 | Prove the complete inference flow | [W6D1 inference gate](#w6d1-reproducible-real-inference-gate) |
@@ -49,7 +50,7 @@ the host, change the database and Redis hosts to `localhost` as described in
 | Data contract | Validated MVTec AD `tile` ingestion, deterministic splits and fingerprints, mask handling, and shared offline/online preprocessing |
 | Model baseline | Frozen ResNet-18 features, exact Euclidean nearest-neighbor scoring, and a validation-only frozen threshold |
 | Production inference | Fail-closed package loading, checksum and lineage validation, worker-side inference, bounded retries, lease recovery, fenced lifecycle persistence, and safe failures |
-| Verification | Canonical gate with 362 tests, including 7 explicit PostgreSQL 16 concurrency and migration tests; the W7D4 production marker selects 171 cross-boundary tests |
+| Verification | Canonical gate with the complete regression suite, including 7 explicit PostgreSQL 16 concurrency and migration tests; the W7D4 production marker selects 171 cross-boundary tests |
 
 ## Project Goal
 
@@ -427,19 +428,56 @@ and manual dispatches. Its mandatory repository-verification job installs the
 pinned Python environment, checks exact dependency versions, documentation,
 one Alembic head, Black formatting for added or changed Python files, the full
 test suite with ephemeral PostgreSQL 16, the strict W7D4 gate, and Docker
-Compose configuration. A separate mandatory job builds the application image
-without publishing it.
+Compose configuration. Separate mandatory jobs audit installed pinned Python
+dependencies with `pip-audit==2.10.1` and build/inspect the immutable
+application image without publishing it. The audit reports known Python
+dependency vulnerabilities only; it is not an image scan, SBOM, provenance
+attestation, signing mechanism, or application-security proof.
+The audit remains strict except for the exact temporary ECDSA advisory accepted
+in [ADR 0013](docs/decisions/0013-temporary-ecdsa-audit-exception.md); every
+other finding blocks the quality gate.
 
 `VDDAI v0.1.0 quality gate` is the stable aggregate check intended for future
-branch protection. It is green only when both mandatory upstream jobs succeed;
-a failure, skip, cancellation, or timeout is not accepted. The workflow uses
-read-only repository permissions, test-only PostgreSQL credentials, and no
-production secret, environment, registry credential, or infrastructure.
+branch protection. It is green only when every mandatory upstream job succeeds;
+a failure, skip, cancellation, or timeout is not accepted. Verification jobs
+use read-only repository permissions and test-only PostgreSQL credentials.
+
+After that aggregate succeeds, only a push to `master` can publish a private
+Linux/amd64 image to GitHub Container Registry. The isolated publication job
+uses GitHub's short-lived `GITHUB_TOKEN` with `contents: read` and
+`packages: write`; pull requests and manual dispatches never publish. It tags
+the image `ghcr.io/burymewithmykatana/vddai:sha-<full-commit-sha>` and records
+OCI source/revision/version labels. The returned
+`ghcr.io/burymewithmykatana/vddai@sha256:...` digest—not `latest` and not a
+floating tag—is the authoritative deployment identity.
 
 CI does not provision the ignored model registry, package, feature bank, or
 ResNet-18 checkpoint and therefore does not claim the deployed real-inference
 proof above. A green CI result is merge-quality evidence only; it does not
 approve merge, release, deployment, or model promotion.
+
+### W8D2 Immutable Image Runtime
+
+`docker-compose.yaml` remains the source-mounted local-development stack. For
+an immutable deployment-oriented run, provision the selected model registry,
+model package, feature bank, and cached ResNet-18 checkpoint outside Git, then
+set a digest-pinned application image and the host directory containing those
+artifacts:
+
+```powershell
+$env:VDDAI_APPLICATION_IMAGE = "ghcr.io/burymewithmykatana/vddai@sha256:<published-digest>"
+$env:VDDAI_ARTIFACTS_PATH = "D:/vddai-runtime-artifacts"
+python scripts/run_immutable_compose.py config --quiet
+python scripts/run_immutable_compose.py up -d
+```
+
+Both API and worker use the exact same `VDDAI_APPLICATION_IMAGE` value, while
+retaining their established `uvicorn` and prediction-worker commands. The
+configuration has no build directive or `.:/app` source mount. It shares only
+the local uploads volume and read-only provisioned artifacts, so it preserves
+the current single-host filesystem-storage boundary. W8D2 does not deploy to a
+host, configure an image-pull credential, or promote a model; those remain
+separate human-controlled work.
 
 ## Image Preprocessing Contract
 

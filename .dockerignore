@@ -7,8 +7,12 @@
 **/*.pyc
 .pytest_cache
 .pytest_tmp
+.w8d2-image.iid
 .env
 *.db
+app/tests
+docs
+scripts
 uploads
 postgres_data
 artifacts

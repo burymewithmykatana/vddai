@@ -11,7 +11,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ExpectedPythonVersion = "3.14.3"
-$ExpectedPipVersion = "26.1.2"
+$ExpectedPipVersion = "26.2"
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RequirementsPath = Join-Path $RepositoryRoot "requirements.txt"
 $VirtualEnvironmentPython = Join-Path $RepositoryRoot ".venv\Scripts\python.exe"

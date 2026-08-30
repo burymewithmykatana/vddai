@@ -92,8 +92,17 @@ public benchmark results.
   worker orchestration compatible with a future object-storage backend.
 - Validate exact dependency versions, documentation structure, one Alembic
   head, changed-Python formatting, the complete test suite with PostgreSQL 16,
-  strict production-regression evidence, Compose wiring, and application-image
-  construction through the hosted repository quality gate.
+  strict production-regression evidence, Compose wiring, Python dependency
+  audit, and application-image construction through the hosted repository
+  quality gate.
+- Build API and worker runtime code into one source-labeled immutable Linux
+  application image. A deployment-oriented configuration must run both
+  processes from the same explicitly supplied digest and must not replace its
+  code with a source bind mount.
+- Treat the published image digest as the authoritative deployment identity;
+  a full-source-SHA tag is a lookup aid and `latest` is not a deployment
+  identity. Generated runtime ML artifacts remain provisioned outside the
+  image and Git.
 - Treat failed, skipped, canceled, timed-out, or unavailable mandatory CI
   evidence as non-green. CI success remains evidence for human review and does
   not authorize merge, release, deployment, or model promotion.
