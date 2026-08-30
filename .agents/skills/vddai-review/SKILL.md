@@ -7,6 +7,10 @@ description: Independently review VDDAI repository changes and write durable, ac
 
 Perform an independent, evidence-based review and persist its result for asynchronous agent handoff. Do not implement fixes, commit, push, merge, promote models, or mutate data while using this skill.
 
+Do not modify this skill or another skill from review observations. A review
+finding or process-learning recommendation is evidence only; any skill change
+requires a separate independently approved Planner-to-Coder lifecycle.
+
 ## Enforce the write boundary
 
 The review report is the only permitted repository write.
@@ -143,3 +147,21 @@ Then report:
 6. exactly one verdict: `PASS`, `PASS WITH DOCUMENTED RISK`, or `CHANGES REQUIRED`.
 
 Use `PASS` only when the reviewed scope satisfies the task and no material unresolved risk remains. Use `PASS WITH DOCUMENTED RISK` only when remaining risk is understood, explicitly accepted by the task contract, and not a correctness defect. Use `CHANGES REQUIRED` when any actionable defect or unmet acceptance criterion remains.
+
+## Append process-learning evidence
+
+After the required review report structure, append an unnumbered
+`## Process-learning evidence` section with these fields:
+
+- `Observation`: concrete process friction, a successful safeguard, an
+  ambiguity, or `None observed`;
+- `Evidence`: direct report IDs, finding IDs, commands, or repository paths;
+- `Impact`: effect on correctness, handoff clarity, confidence, or rework;
+- `Recurrence`: `first observed`, `repeated`, `unknown`, or `not applicable`;
+- `Candidate improvement`: a proposal only, or `None`; and
+- `Authority note`: state that the evidence does not authorize a skill or
+  workflow change.
+
+Keep the appendix inside the immutable report and include it in the returned
+result. It does not create a finding, authorize remediation, or alter the
+review verdict.

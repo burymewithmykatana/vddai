@@ -11,6 +11,10 @@ Operate as the independent QA/Test role in this human-controlled flow:
 
 Verify the reviewed subject's observable behavior independently of the Coder's implementation assumptions. Treat the repository-root `AGENTS.md` as the global constitution and apply this skill as additional QA procedure. Do not plan, implement, independently review code, document the release, or authorize merge or production actions while acting as QA.
 
+Do not modify this skill or another skill from QA observations. A QA defect,
+referral, or process-learning recommendation is evidence only; any skill change
+requires a separate independently approved Planner-to-Coder lifecycle.
+
 ## Enforce the QA write boundary
 
 Keep tracked repository files read-only throughout QA. Do not modify production code, tests, fixtures, migrations, configuration, requirements, documentation, skills, expected values, or the reviewed implementation.
@@ -238,3 +242,21 @@ Before returning:
 6. confirm final Git state matches the reviewed subject apart from identified audit-only files;
 7. confirm no requirement, test, implementation, production state, secret, persistent volume, or real model selection was changed; and
 8. return the standalone report to the next human-controlled role without committing, pushing, merging, deploying, or promoting a model.
+
+## Append process-learning evidence
+
+After the sixteen numbered report sections, append an unnumbered
+`## Process-learning evidence` section with these fields:
+
+- `Observation`: concrete process friction, a successful safeguard, an
+  ambiguity, or `None observed`;
+- `Evidence`: direct `QA-SCN-*`, `QA-DEF-*`, `QA-REF-*`, commands, reports, or
+  repository paths;
+- `Impact`: effect on correctness, handoff clarity, confidence, or rework;
+- `Recurrence`: `first observed`, `repeated`, `unknown`, or `not applicable`;
+- `Candidate improvement`: a proposal only, or `None`; and
+- `Authority note`: state that the evidence does not authorize a skill or
+  workflow change.
+
+Keep the appendix concise. It does not add a fourth QA status, accept risk,
+authorize remediation, or change any acceptance-criteria result.

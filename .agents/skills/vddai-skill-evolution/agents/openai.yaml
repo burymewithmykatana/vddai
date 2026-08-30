@@ -1,0 +1,4 @@
+interface:
+  display_name: "VDDAI Skill Evolution"
+  short_description: "Propose evidence-driven workflow improvements"
+  default_prompt: "Use $vddai-skill-evolution to analyze this human-selected VDDAI process-evidence range and return proposals only, without changing repository files."

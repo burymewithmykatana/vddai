@@ -23,6 +23,9 @@ While this skill is active, do not:
 - make an unapproved durable architecture decision;
 - introduce a framework, service, infrastructure component, or orchestration system for convenience;
 - commit, push, merge, deploy, promote or roll back a model, or mutate production data.
+- modify this skill or another skill based on planning observations or
+  process-learning evidence. Skill changes require a separate independently
+  approved handoff executed by the Coder role.
 
 Use small pseudocode, interface sketches, state tables, or data-flow diagrams only when they clarify a proposed contract. Label them as design guidance, not implementation.
 
@@ -230,3 +233,21 @@ Before returning the plan:
 7. Confirm the plan contains no implementation change and no scope outside the approved task.
 
 Return the plan for human approval. Recommend review of the plan before invoking a Coder role.
+
+## Append process-learning evidence
+
+After the eleven numbered sections, append an unnumbered
+`## Process-learning evidence` section with these fields:
+
+- `Observation`: concrete process friction, a successful safeguard, an
+  ambiguity, or `None observed`;
+- `Evidence`: direct report IDs, finding or scenario IDs, commands, or
+  repository paths;
+- `Impact`: effect on correctness, handoff clarity, confidence, or rework;
+- `Recurrence`: `first observed`, `repeated`, `unknown`, or `not applicable`;
+- `Candidate improvement`: a proposal only, or `None`; and
+- `Authority note`: state that the evidence does not authorize a skill or
+  workflow change.
+
+Keep this appendix concise. Do not infer missing evidence or treat the
+candidate improvement as part of the approved Coder handoff.
