@@ -24,6 +24,11 @@ The W7D4 production-security-and-reliability review series is:
 1. [`2026-08-22-w7d4-production-security-reliability-gate.md`](2026-08-22-w7d4-production-security-reliability-gate.md)
 2. [`2026-08-22-w7d4-production-security-reliability-gate-r2.md`](2026-08-22-w7d4-production-security-reliability-gate-r2.md)
 
+Process retrospectives are immutable audit evidence rather than implementation
+reviews or current workflow authority. The initial evidence baseline is:
+
+1. [`2026-08-30-w7d2-w8d2-process-retrospective.md`](2026-08-30-w7d2-w8d2-process-retrospective.md)
+
 For a new task, create a new dated report series with the task slug. Never edit
 an earlier report to make a later result appear cleaner; add remediation and
 re-review evidence.

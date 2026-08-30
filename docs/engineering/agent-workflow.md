@@ -1,9 +1,9 @@
 # Agent Handoff and Workflow Contract
 
 - Status: Current
-- Last reviewed: 2026-08-19
+- Last reviewed: 2026-08-31
 - Scope: human-controlled VDDAI planning, implementation, review, QA,
-  documentation, and merge handoffs
+  documentation, merge handoffs, and evidence-driven process learning
 
 ## Purpose and Authority
 
@@ -47,6 +47,38 @@ An artifact's existence is not approval. A successful implementation, review,
 QA run, Documentation pass, CI run, or pull request does not authorize the next
 human-gated action unless the required approval is explicit.
 
+## Process-Learning Loop
+
+Each lifecycle role appends concise process-learning evidence to its normal
+report. Coder additionally records detailed process telemetry. A human may
+select a bounded evidence range and explicitly invoke
+[`$vddai-skill-evolution`](../../.agents/skills/vddai-skill-evolution/SKILL.md)
+to analyze it:
+
+```text
+Lifecycle report evidence
+  -> human invokes $vddai-skill-evolution
+  -> proposal only
+  -> Planner
+  -> human plan approval
+  -> Coder
+  -> independent Reviewer
+  -> independent QA
+  -> Documentation
+  -> human merge decision
+```
+
+The process-learning loop does not modify the delivery loop and is not an
+automatic lifecycle stage. Reports, retrospectives, recurrence, confidence,
+and proposals are advisory evidence rather than requirements or authority.
+The meta-skill remains read-only, cannot invoke itself recursively, cannot
+continue automatically to Coder, and cannot edit its own or another skill.
+
+No role may use its own report, another role's report, or a retrospective to
+authorize skill changes. A Coder may edit only the skill and workflow files
+explicitly identified by an independent Planner handoff and human approval.
+The resulting change follows the full delivery lifecycle above.
+
 ## Role Ownership
 
 | Role | Owns | Must not do |
@@ -56,6 +88,7 @@ human-gated action unless the required approval is explicit.
 | [Reviewer](../../.agents/skills/vddai-review/SKILL.md) | Independent review, immutable reports, `VDDAI-REV-*` findings, closure checks, finding status, and the review verdict | Implement fixes, mutate reviewed files other than its new report, or authorize merge |
 | [QA/Test](../../.agents/skills/vddai-qa/SKILL.md) | Independent behavioral verification, criterion evidence, `QA-SCN-*`, `QA-DEF-*`, `QA-REF-*`, and `PASS`/`FAIL`/`BLOCKED` classification | Fix defects, change permanent tests or requirements, duplicate Reviewer findings, or accept new risk |
 | [Documentation](../../.agents/skills/vddai-documentation/SKILL.md) | Truthful durable documentation for the eligible reviewed and QA-verified implementation, documentation-only validation, and its standalone report | Change implementation, tests, requirements, review evidence, or represent later prose as QA-tested |
+| [Skill Evolution](../../.agents/skills/vddai-skill-evolution/SKILL.md) | Human-requested analysis of a bounded process-evidence range and proposal-only improvement candidates | Act as a lifecycle stage, write repository files, approve or implement a proposal, invoke itself, or bypass Planner and human approval |
 
 For ML, data, lineage, or artifact changes, apply
 [`$vddai-ml-change`](../../.agents/skills/vddai-ml-change/SKILL.md) alongside the
@@ -69,6 +102,26 @@ material conclusions against the direct sources authoritative for that
 conclusion's purpose. Stale or unavailable Graphify evidence never blocks the
 workflow; the role falls back to direct repository inspection. See
 [`repository-intelligence.md`](repository-intelligence.md).
+
+## Process-Learning Evidence
+
+Planner, Coder, Reviewer, QA, and Documentation retain their existing required
+report sections and statuses, then append an unnumbered
+`Process-learning evidence` section. It uses stable fields for observation,
+direct evidence, impact, recurrence, candidate improvement, and an authority
+note. `None observed` is valid; missing evidence must not be inferred.
+
+Coder also appends a detailed process-telemetry ledger covering entry and base
+reconciliation, planned-versus-actual files and sequence, deviations, corrected
+assumptions, commands and outcomes, elapsed duration when available, retries,
+blocker ownership, human interventions, remediation IDs, and disposable-state
+cleanup. `not recorded` is required when a historical or current value is
+unavailable.
+
+Process evidence must exclude secrets, credentials, customer data, private
+artifact contents, and unnecessary raw logs. It is diagnostic evidence, not an
+agent score, acceptance criterion, review finding, QA status, risk acceptance,
+or approval. The owning role skill defines its exact appendix schema.
 
 ## Handoff Artifacts
 
@@ -291,6 +344,9 @@ that role to own and the role's entry contract is genuinely inapplicable.
 - Keep commits logically focused and preserve unrelated user work.
 - Never merge automatically. Implementation, review, QA, Documentation, and CI
   success are evidence for a human decision, not substitutes for it.
+- Never modify a skill from its own observations or from an unapproved
+  retrospective. Skill and workflow changes require the independent
+  Planner-to-human-to-Coder route and the complete downstream lifecycle.
 - A5 and this lifecycle end at the human merge gate. Merge completion does not
   authorize deployment or release.
 - Separate explicit human approval remains required for production deployment,
@@ -378,5 +434,6 @@ authorized task and its applicable evidence and human gate.
 - [`$vddai-review`](../../.agents/skills/vddai-review/SKILL.md)
 - [`$vddai-qa`](../../.agents/skills/vddai-qa/SKILL.md)
 - [`$vddai-documentation`](../../.agents/skills/vddai-documentation/SKILL.md)
+- [`$vddai-skill-evolution`](../../.agents/skills/vddai-skill-evolution/SKILL.md)
 - [`$vddai-ml-change`](../../.agents/skills/vddai-ml-change/SKILL.md)
 - [`Documentation index`](../README.md)

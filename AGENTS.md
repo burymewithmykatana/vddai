@@ -114,6 +114,27 @@ frameworks, abstractions, or services unless they solve a concrete v0.1.0
 requirement. Do not split the application into microservices before v0.1.0
 without an approved architecture decision.
 
+## Agent Skill Evolution
+
+Lifecycle reports may record process-learning evidence, and the human-invoked
+`$vddai-skill-evolution` meta-skill may analyze a bounded evidence set. That
+evidence and every resulting proposal are advisory only. They do not change a
+requirement, approve implementation, authorize remediation, or modify a role's
+operating contract.
+
+No agent may autonomously modify the skill currently governing its role or use
+its own report, another role's report, or a retrospective as authority to
+modify any skill. A skill or workflow-contract change must return through an
+independent `$vddai-plan` handoff, explicit human plan approval,
+`$vddai-code` implementation, `$vddai-review`, `$vddai-qa`,
+`$vddai-documentation`, and human merge approval. During that separately
+approved implementation, the Coder may edit only the skill and workflow files
+explicitly named by the handoff and must stop rather than redesign the change.
+
+Keep this loop repository-native. Do not add an external orchestrator, runtime
+service, database, scheduler, automatic invocation, or autonomous
+self-modification mechanism for process learning.
+
 ## Repository Intelligence
 
 Graphify is optional, local, generated repository intelligence for structural

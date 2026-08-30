@@ -105,6 +105,12 @@ Do not independently choose or change:
 - a framework, service, infrastructure dependency, or destructive migration behavior; or
 - any durable decision that should be resolved by the Planner or a human.
 
+Do not modify this skill or another skill unless a separate independently
+produced Planner handoff, explicitly approved by a human, names the exact
+skill or workflow files as implementation targets. Even then, implement only
+the prescribed contract; do not use Coder telemetry or process-learning
+evidence to redesign or expand it.
+
 When an implementation detail exposes one of these decisions, stop the current run. State the decision, affected invariant, smallest alternatives when known, and exact approval or replanning required. Never hide a redesign inside a helper, refactor, fallback, or test accommodation.
 
 ## Implement the smallest coherent change
@@ -207,3 +213,34 @@ Before returning:
 5. Confirm documentation, migration, compatibility, and artifact effects are reported.
 6. Confirm no prohibited Git, deployment, data, secret, or model action occurred.
 7. Hand the implementation report to an independent `$vddai-review`; do not perform the review while acting as the Coder.
+
+## Append process-learning evidence
+
+After the fourteen report items, append an unnumbered
+`## Process-learning evidence` section with these fields:
+
+- `Observation`: concrete process friction, a successful safeguard, an
+  ambiguity, or `None observed`;
+- `Evidence`: direct report IDs, finding IDs, commands, or repository paths;
+- `Impact`: effect on correctness, handoff clarity, confidence, or rework;
+- `Recurrence`: `first observed`, `repeated`, `unknown`, or `not applicable`;
+- `Candidate improvement`: a proposal only, or `None`; and
+- `Authority note`: state that the evidence does not authorize a skill or
+  workflow change.
+
+Then append `## Coder process telemetry` containing:
+
+- entry-contract and base reconciliation;
+- planned files and sequence compared with actual files and sequence;
+- every deviation, its reason, and any repository assumption corrected;
+- a verification ledger with command, result, elapsed duration when available,
+  retry count, and blocker owner when applicable;
+- human gates and manual interventions encountered;
+- review or remediation finding IDs handled;
+- temporary or generated evidence and its cleanup outcome; and
+- process friction and candidate improvements.
+
+Use `not recorded` when a value is unavailable; never reconstruct or fabricate
+telemetry. Keep secrets, credentials, customer data, private artifact contents,
+and unnecessary raw logs out of both sections. These sections are diagnostic
+report evidence, not authorization, agent scoring, or an approval criterion.

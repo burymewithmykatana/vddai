@@ -68,8 +68,16 @@ remain authoritative for their own complete entry and output schemas.
 - [`$vddai-documentation`](../.agents/skills/vddai-documentation/SKILL.md)
   synchronizes durable documentation only after eligible Reviewer evidence and
   QA `PASS`, then leaves the proposed subject at the human merge gate.
+- [`$vddai-skill-evolution`](../.agents/skills/vddai-skill-evolution/SKILL.md)
+  is a separately human-invoked, read-only meta-skill that analyzes bounded
+  process evidence and returns proposals only. Any proposal must re-enter at
+  Planner and complete the normal human-controlled lifecycle.
 - Use [`$vddai-ml-change`](../.agents/skills/vddai-ml-change/SKILL.md) alongside
   the applicable Planner or Coder role for ML, data, lineage, and artifact work.
+
+Every lifecycle role records concise process-learning evidence without making
+that evidence authoritative. Coder also records detailed process telemetry.
+No role may autonomously modify its own or another skill.
 
 For every role:
 

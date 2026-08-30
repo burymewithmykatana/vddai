@@ -35,6 +35,11 @@ existing skills, or review and remediation reports. Never change production
 code or tests to make documentation true. Never rewrite the approved task or
 requirements to match implementation.
 
+Documentation observations and process-learning recommendations are evidence
+only. They do not authorize this role to modify this skill or another skill;
+skill changes require a separate independently approved Planner-to-Coder
+lifecycle.
+
 Return the Documentation report in the task. Do not store it in
 `docs/reviews/`; that directory is owned by `$vddai-review` audit evidence.
 Do not stage, commit, push, update a pull request, merge, deploy, mutate data or
@@ -352,3 +357,21 @@ Before returning:
    modified audit report, implementation, secret, or generated artifact; and
 7. return the standalone report to the human merge gate without committing,
    pushing, merging, deploying, or promoting a model.
+
+## Append process-learning evidence
+
+After the twelve numbered report sections, append an unnumbered
+`## Process-learning evidence` section with these fields:
+
+- `Observation`: concrete process friction, a successful safeguard, an
+  ambiguity, or `None observed`;
+- `Evidence`: direct report identities, validation commands, or repository
+  paths;
+- `Impact`: effect on correctness, handoff clarity, confidence, or rework;
+- `Recurrence`: `first observed`, `repeated`, `unknown`, or `not applicable`;
+- `Candidate improvement`: a proposal only, or `None`; and
+- `Authority note`: state that the evidence does not authorize a skill or
+  workflow change.
+
+Keep the appendix concise. It does not expand the Documentation write boundary,
+change the Documentation outcome, or authorize a merge.
