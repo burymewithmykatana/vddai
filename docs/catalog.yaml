@@ -88,3 +88,11 @@ documents:
     area: decisions
     kind: architecture-decision
     status: accepted
+  - path: docs/decisions/0012-immutable-application-image-publication.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted
+  - path: docs/decisions/0013-temporary-ecdsa-audit-exception.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted

@@ -57,7 +57,7 @@ jobs:
 
       - name: Install pinned dependencies
         run: |
-          python -m pip install --upgrade "pip==26.1.2"
+          python -m pip install --upgrade "pip==26.2"
           python -m pip install --requirement requirements.txt
 
       - name: Resolve changed-file formatting range
@@ -96,6 +96,39 @@ jobs:
       - name: Run strict W7D4 production and reliability gate
         run: python scripts/run_production_gate.py
 
+  dependency-security:
+    name: Dependency security audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.14.3
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14.3"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install pinned runtime dependencies
+        run: |
+          python -m pip install --upgrade "pip==26.2"
+          python -m pip install --requirement requirements.txt
+
+      - name: Audit installed Python dependencies
+        run: |
+          python -m pip install "pip-audit==2.10.1"
+          # ADR 0013 approves only this temporary ecdsa advisory exception.
+          python -m pip_audit --local --strict --ignore-vuln PYSEC-2026-1325
+
   image:
     name: Application image build
     runs-on: ubuntu-24.04
@@ -107,14 +140,30 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build application image without publishing
-        run: docker build --tag "vddai-ci:${GITHUB_SHA}" .
+      - name: Build immutable application image without publishing
+        run: |
+          docker build \
+            --iidfile "${RUNNER_TEMP}/vddai-image.iid" \
+            --tag "vddai-ci:${GITHUB_SHA}" \
+            --build-arg "SOURCE_REPOSITORY=https://github.com/${GITHUB_REPOSITORY}" \
+            --build-arg "SOURCE_REVISION=${GITHUB_SHA}" \
+            --build-arg "IMAGE_VERSION=0.1.0" \
+            .
+
+      - name: Inspect immutable application image identity
+        run: |
+          python3 scripts/validate_immutable_image.py \
+            --image "$(cat "${RUNNER_TEMP}/vddai-image.iid")" \
+            --source "https://github.com/${GITHUB_REPOSITORY}" \
+            --revision "${GITHUB_SHA}" \
+            --version "0.1.0"
 
   quality-gate:
     name: VDDAI v0.1.0 quality gate
     if: ${{ always() }}
     needs:
       - verification
+      - dependency-security
       - image
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -124,10 +173,71 @@ jobs:
       - name: Require every upstream quality job to pass
         env:
           VERIFICATION_RESULT: ${{ needs.verification.result }}
+          DEPENDENCY_SECURITY_RESULT: ${{ needs.dependency-security.result }}
           IMAGE_RESULT: ${{ needs.image.result }}
         run: |
-          if [ "${VERIFICATION_RESULT}" != "success" ] || [ "${IMAGE_RESULT}" != "success" ]; then
-            echo "Required quality job failed: verification=${VERIFICATION_RESULT}, image=${IMAGE_RESULT}" >&2
+          if [ "${VERIFICATION_RESULT}" != "success" ] || [ "${DEPENDENCY_SECURITY_RESULT}" != "success" ] || [ "${IMAGE_RESULT}" != "success" ]; then
+            echo "Required quality job failed: verification=${VERIFICATION_RESULT}, dependency-security=${DEPENDENCY_SECURITY_RESULT}, image=${IMAGE_RESULT}" >&2
             exit 1
           fi
           echo "All required VDDAI v0.1.0 quality jobs passed."
+
+  publish:
+    name: Publish immutable application image
+    if: >-
+      ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' &&
+      needs.quality-gate.result == 'success' }}
+    needs:
+      - quality-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish the immutable Linux application image
+        id: publish-image
+        shell: bash
+        run: |
+          image_name="ghcr.io/${GITHUB_REPOSITORY,,}"
+          image_tag="sha-${GITHUB_SHA}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance=false \
+            --metadata-file image-metadata.json \
+            --push \
+            --tag "${image_name}:${image_tag}" \
+            --build-arg "SOURCE_REPOSITORY=https://github.com/${GITHUB_REPOSITORY}" \
+            --build-arg "SOURCE_REVISION=${GITHUB_SHA}" \
+            --build-arg "IMAGE_VERSION=0.1.0" \
+            .
+          digest="$(jq --raw-output '."containerimage.digest"' image-metadata.json)"
+          if [ -z "${digest}" ] || [ "${digest}" = "null" ]; then
+            echo "Published image metadata did not contain a digest." >&2
+            exit 1
+          fi
+          immutable_image="${image_name}@${digest}"
+          echo "immutable_image=${immutable_image}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "## Published immutable application image"
+            echo
+            echo "- Source revision: \`${GITHUB_SHA}\`"
+            echo "- Lookup tag: \`${image_name}:${image_tag}\`"
+            echo "- Authoritative deployment identity: \`${immutable_image}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

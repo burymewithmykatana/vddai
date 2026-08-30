@@ -55,7 +55,7 @@ current PostgreSQL concurrency and migration tests, while every new test carryin
 both gate markers also becomes mandatory. Running the marker directly retains
 the canonical suite's optional-PostgreSQL behavior and is not a W7D4 verdict.
 
-## Hosted W8D1 quality gate
+## Hosted W8 quality gate and image publication
 
 `.github/workflows/ci.yml` is the authoritative hosted merge-quality gate for
 pull requests, `master` pushes, and manual dispatches. It provisions an
@@ -64,14 +64,31 @@ the default PostgreSQL skips, then runs `scripts/run_production_gate.py` as the
 strict W7D4 regression verdict. The same mandatory job validates exact Python,
 pip, and requirement pins, documentation, one Alembic head, Black formatting
 for Python files added or changed in the Git comparison, and Docker Compose
-configuration. A separate mandatory job builds the application image without
-publishing it.
+configuration. A separate mandatory job builds and inspects the immutable
+application image without publishing it. Another mandatory job audits the
+installed pinned Python environment with `pip-audit==2.10.1`; this is a known
+dependency-vulnerability check, not an operating-system image scan, SBOM,
+provenance attestation, signing mechanism, or proof of application security.
+The audit is strict except for the one exact, temporary ECDSA advisory documented
+in ADR 0013; every other finding remains non-green.
 
-The stable aggregate check is `VDDAI v0.1.0 quality gate`. It succeeds only when
-both required jobs report `success`; failure, skip, cancellation, timeout, or
-unavailable evidence remains non-green. The workflow has read-only repository
-permission and uses no production secret, GitHub environment, registry
-credential, or production infrastructure.
+The stable aggregate check is `VDDAI v0.1.0 quality gate`. It succeeds only
+when every required job reports `success`; failure, skip, cancellation, timeout,
+or unavailable evidence remains non-green. The verification, audit, image, and
+aggregate jobs retain read-only repository access. Only a push to `master`
+after that aggregate succeeds may run the isolated GHCR publication job. It has
+only `contents: read` and `packages: write` and uses the GitHub Actions
+short-lived `GITHUB_TOKEN`; pull requests and manual dispatches never publish.
+
+The published private image uses a full-source-SHA lookup tag and OCI source,
+revision, and version labels. Its returned digest is the authoritative staging
+or release identity; never deploy by `latest` or ambient registry discovery.
+The image contains application code and pinned runtime dependencies, not the
+ignored model registry, package, feature bank, checkpoint, uploads, or other
+runtime state. The deployment-oriented `scripts/run_immutable_compose.py`
+validates the explicitly supplied digest, then streams the Compose
+configuration with those artifacts mounted read-only for API and worker. It
+does not provision, deploy, or promote a model.
 
 Hosted CI does not provision ignored registry, package, feature-bank, or model
 weight files and does not run the data-creating deployed probe. The deployed
@@ -102,7 +119,8 @@ docker compose logs --tail=200 api
 docker compose logs --tail=200 worker
 ```
 
-Do not use `docker compose down -v` as part of this gate.
+When teardown is required, use `docker compose down`. Do not append `-v`
+without explicit human authorization because it deletes local Docker volumes.
 
 ## Risk register
 
