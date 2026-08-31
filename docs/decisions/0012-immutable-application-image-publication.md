@@ -39,7 +39,7 @@ or used for deployment. A later staging or release action must receive the
 exact digest explicitly; it must not discover an ambient registry tag.
 
 The existing `docker-compose.yaml` remains the source-mounted local-development
-path. `scripts/run_immutable_compose.py` is the only deployment-oriented
+path. `scripts/run_immutable_compose.py` is the W8D2 deployment-oriented
 Compose entry point: it validates one digest-pinned
 `VDDAI_APPLICATION_IMAGE` value before supplying the configuration to Compose.
 The API and worker retain their distinct commands and have no application source
@@ -48,6 +48,14 @@ boundary by sharing a named uploads volume and mounting intentionally
 provisioned runtime artifacts read-only at `/app/artifacts`. PostgreSQL and
 Redis remain the existing dependencies; the prediction queue remains
 database-backed.
+
+The human-approved W8D3 amendment in
+[ADR 0014](0014-single-host-staging-environment.md) extends the original
+sole-entry-point restriction with a separate `scripts/run_staging_compose.py`
+launcher. It reuses W8D2 application-image and artifact-path validation while
+owning the staging Compose document and invocation. The existing W8D2 entry
+point, immutable-image contract, publication workflow, and local-development
+behavior remain unchanged.
 
 The CI workflow keeps its stable aggregate quality gate. It adds a read-only
 dependency audit of the installed pinned Python environment with

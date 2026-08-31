@@ -110,6 +110,10 @@ public benchmark results.
   retry-hint limits are non-positive or globally inconsistent.
 - Keep generated datasets, feature banks, thresholds, evaluation runs, model
   weights, and runtime state outside Git.
+- Provide one reproducible, single-host staging configuration with HTTPS ingress
+  and internal-only PostgreSQL and Redis. Require digest-selected API, worker,
+  dependency, and provisioned model-artifact identities; keep staging secrets
+  outside Git and retain the current shared local-storage boundary.
 
 ## Deferred Capabilities
 

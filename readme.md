@@ -479,6 +479,15 @@ the current single-host filesystem-storage boundary. W8D2 does not deploy to a
 host, configure an image-pull credential, or promote a model; those remain
 separate human-controlled work.
 
+### W8D3 Staging Runtime
+
+The staging path is separate from source-mounted local development. It runs one
+explicit digest for API and worker behind HTTPS and keeps PostgreSQL, Redis,
+uploads, certificates, and model artifacts on the approved single host. Follow
+the [staging procedure](docs/engineering/production-readiness.md#w8d3-staging-environment)
+and invoke `python scripts/run_staging_compose.py`; do not use development
+Compose for a public staging endpoint.
+
 ## Image Preprocessing Contract
 
 Every stored image passed to the future model boundary follows this deterministic pipeline:

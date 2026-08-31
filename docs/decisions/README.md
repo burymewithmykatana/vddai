@@ -16,8 +16,9 @@ their status or an amendment explicitly says otherwise.
 | [`0009`](0009-durable-image-storage-boundary.md) | Accepted; amended | Durable prediction-image storage boundary |
 | [`0010`](0010-database-backed-prediction-reliability.md) | Accepted | Database-backed prediction reliability |
 | [`0011`](0011-database-backed-prediction-admission.md) | Accepted; amended | Database-backed prediction admission and resource guardrails |
-| [`0012`](0012-immutable-application-image-publication.md) | Accepted | Immutable application image publication |
+| [`0012`](0012-immutable-application-image-publication.md) | Accepted; amended by ADR 0014 | Immutable application image publication |
 | [`0013`](0013-temporary-ecdsa-audit-exception.md) | Accepted | Temporary ECDSA dependency-audit exception |
+| [`0014`](0014-single-host-staging-environment.md) | Accepted | Reproducible single-host staging environment |
 
 Create the next zero-padded number for a new decision. Preserve historical
 context, record consequences, and mark replaced decisions as superseded rather

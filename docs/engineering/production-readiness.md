@@ -96,6 +96,69 @@ real-inference proof remains environment-specific release evidence. CI success
 does not make the full W7D4 release outcome green by itself and never authorizes
 merge, release, deployment, or model promotion.
 
+## W8D3 staging environment
+
+ADR 0014 defines the approved staging boundary: one Linux Docker Compose host,
+with Caddy as the only public service and a stable HTTPS FQDN. The API and
+worker use one explicit GHCR digest and the staging runner also requires exact
+digest references for PostgreSQL, Redis, and Caddy. Never substitute a tag,
+`latest`, source bind mount, or an ambient image discovery step.
+
+Copy `deploy/staging/staging.env.example` to a permission-restricted location
+outside the repository, replace every template credential, and set
+`VDDAI_STAGING_ENV_FILE` to that absolute file path. Set the staging FQDN,
+approved image digests, and an absolute host path to the already provisioned
+artifact snapshot. Authenticate the host Docker client to private GHCR with a
+pull-only credential held outside Git. Do not print the environment file or
+credentials.
+
+The staging env file supports literal, unquoted printable ASCII values only:
+no whitespace, quotes, dollar signs, hash signs, backslashes, interpolation,
+inline comments, or duplicate keys. Use full-line comments. Only settings listed
+in the template are supported; libpq `PG*` routing overrides are not accepted.
+PostgreSQL user and database names must contain only ASCII letters, digits, and
+underscores and must not start with a digit. `DATABASE_URL` must exactly match
+`postgresql+psycopg://USER:PASSWORD@postgres:5432/DATABASE`, with the same
+bootstrap user/database and password. Choose a long random password using only
+ASCII letters, digits, and `-._~`; use the identical literal in both settings.
+Percent-encoded or other punctuation-bearing passwords are rejected because
+the existing Alembic configuration handoff cannot accept percent escapes.
+Query parameters, alternate hosts,
+ports, and mismatched credentials are rejected before Compose runs. Do not
+print real credentials when preparing this URL.
+
+```powershell
+$env:VDDAI_STAGING_ENV_FILE = "/etc/vddai/staging.env"
+$env:VDDAI_STAGING_FQDN = "staging.example.com"
+$env:VDDAI_APPLICATION_IMAGE = "ghcr.io/owner/vddai@sha256:<digest>"
+$env:VDDAI_POSTGRES_IMAGE = "docker.io/library/postgres@sha256:<digest>"
+$env:VDDAI_REDIS_IMAGE = "docker.io/library/redis@sha256:<digest>"
+$env:VDDAI_CADDY_IMAGE = "docker.io/library/caddy@sha256:<digest>"
+$env:VDDAI_ARTIFACTS_PATH = "/srv/vddai/artifacts"
+python scripts/run_staging_compose.py config --quiet
+python scripts/run_staging_compose.py up -d
+```
+
+The runner fixes the Compose project name to `vddai-staging`; do not use an
+ambient `COMPOSE_PROJECT_NAME` to create a second set of staging volumes. API
+readiness requires both `/health` and `/health/model`, so worker and Caddy do
+not start until the provisioned production-selected package is valid.
+
+The artifacts directory is mounted read-only and must contain the selected
+registry, package, feature bank, and ResNet checkpoint. Confirm the expected
+identity through `GET /health/model`; it exposes only the selected model
+version and package ID. `GET /health` and `GET /health/db` provide the other
+safe readiness interfaces. W8D4 owns live authenticated smoke testing and
+rollback execution; do not run its data-creating probe against staging until
+that task is approved.
+
+Before a deploy that can migrate schema, stop the worker and take recoverable
+backups of PostgreSQL, uploads, and the artifact snapshot. Keep the old image
+digest and artifact snapshot until the replacement is accepted. Do not run old
+and new worker versions together. A downgrade requires the ADR 0010/0011
+preconditions; do not use `docker compose down -v`, which deletes durable
+state, without explicit human authorization.
+
 ## Required commands
 
 From the repository root:
