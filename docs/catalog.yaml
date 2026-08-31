@@ -96,3 +96,7 @@ documents:
     area: decisions
     kind: architecture-decision
     status: accepted
+  - path: docs/decisions/0014-single-host-staging-environment.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted
