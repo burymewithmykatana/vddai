@@ -9,7 +9,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
-from app.api.routes import prediction as prediction_route
 from app.contracts.inference import (
     INFERENCE_CONTRACT_SCHEMA_VERSION,
     MODEL_PACKAGE_SCHEMA_VERSION,
@@ -20,6 +19,7 @@ from app.contracts.inference import (
     PredictionLabel,
 )
 from app.core.config import settings
+from app.core.logging import LogError, LogEvent, setup_logging
 from app.core.security import create_access_token
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
@@ -46,6 +46,7 @@ from app.tests.model_package_fixtures import (
     write_package_fixture,
 )
 from app.tests.image_fixtures import png_with_declared_dimensions
+from app.tests.test_structured_logging import read_structured_logs
 from app.workers import prediction_worker
 from app.workers.prediction_worker import process_next_prediction, run_forever
 
@@ -325,6 +326,7 @@ def test_create_prediction_commit_failure_removes_orphaned_upload(
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     object_store = configure_local_image_storage(
         monkeypatch,
@@ -370,6 +372,21 @@ def test_create_prediction_commit_failure_removes_orphaned_upload(
     assert not any(path.is_file() for path in (tmp_path / "objects").rglob("*"))
     assert db.query(Prediction).count() == 0
 
+    raw, events = read_structured_logs(capsys)
+    assert "simulated queue commit failure" not in raw
+    assert deleted_keys[0] not in raw
+    assert [(event["event"], event["status"]) for event in events] == [
+        (LogEvent.STORAGE_WRITE, "ok"),
+        (LogEvent.STORAGE_CLEANUP, "ok"),
+        (LogEvent.ENQUEUE, "error"),
+        (LogEvent.HTTP_REQUEST, "error"),
+    ]
+    assert events[2]["error_code"] == LogError.ENQUEUE_FAILED
+    assert events[3]["error_code"] == LogError.REQUEST_FAILED
+    assert events[0]["request_id"] is not None
+    assert all(event["request_id"] == events[0]["request_id"] for event in events)
+    assert all(event["job_id"] is None for event in events)
+
 
 def test_storage_write_failure_does_not_create_prediction(
     client: TestClient,
@@ -411,6 +428,7 @@ def test_cleanup_failure_is_logged_without_hiding_database_failure(
     client: TestClient,
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     class CleanupFailingObjectStore:
         def write(self, object_key: str, contents: bytes) -> StoredObject:
@@ -442,12 +460,6 @@ def test_cleanup_failure_is_logged_without_hiding_database_failure(
         real_commit()
 
     monkeypatch.setattr(failing_session, "commit", fail_commit)
-    logged_messages: list[str] = []
-    monkeypatch.setattr(
-        prediction_route.logger,
-        "exception",
-        lambda message, *args: logged_messages.append(message),
-    )
 
     def override_get_db():
         yield failing_session
@@ -463,7 +475,16 @@ def test_cleanup_failure_is_logged_without_hiding_database_failure(
     finally:
         failing_session.close()
 
-    assert "failed_to_delete_orphaned_image object_key=%s" in logged_messages
+    raw, events = read_structured_logs(capsys)
+    assert "simulated cleanup failure" not in raw
+    assert "original database failure" not in raw
+    cleanup, enqueue = events[1:3]
+    assert cleanup["event"] == LogEvent.STORAGE_CLEANUP
+    assert cleanup["status"] == "error"
+    assert cleanup["error_code"] == LogError.STORAGE_CLEANUP_FAILED
+    assert enqueue["event"] == LogEvent.ENQUEUE
+    assert enqueue["error_code"] == LogError.ENQUEUE_FAILED
+    assert cleanup["request_id"] == enqueue["request_id"]
 
 
 def test_create_prediction_requires_authentication(
@@ -733,7 +754,9 @@ def test_worker_storage_read_failure_becomes_safe_terminal_failure(
     db: Session,
     test_user: User,
     storage_error: ImageStorageError,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    setup_logging()
     prediction = create_queued_prediction(db, test_user.id)
     read_keys: list[str] = []
 
@@ -766,11 +789,29 @@ def test_worker_storage_read_failure_becomes_safe_terminal_failure(
     assert failed.error_message.startswith(type(storage_error).__name__)
     assert read_keys == [prediction.image_object_key]
 
+    raw, events = read_structured_logs(capsys)
+    assert str(storage_error) not in raw
+    assert read_keys[0] not in raw
+    assert [(event["event"], event["status"]) for event in events] == [
+        (LogEvent.CLAIM, "processing"),
+        (LogEvent.STORAGE_READ, "error"),
+        (LogEvent.TERMINAL_COMMITTED, "failed"),
+    ]
+    assert (
+        events[1]["error_code"]
+        == events[2]["error_code"]
+        == LogError.STORAGE_READ_FAILED
+    )
+    assert all(
+        event["job_id"] == failed.id and event["attempt"] == 1 for event in events
+    )
+
 
 def test_worker_transient_storage_failure_waits_for_retry_without_public_details(
     client: TestClient,
     db: Session,
     test_user: User,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     prediction = create_queued_prediction(db, test_user.id)
 
@@ -812,6 +853,15 @@ def test_worker_transient_storage_failure_waits_for_retry_without_public_details
     assert "attempt_count" not in public_result
     assert "lease_expires_at" not in public_result
     assert "next_attempt_at" not in public_result
+
+    raw, events = read_structured_logs(capsys)
+    assert "temporary backend outage" not in raw
+    assert not any(event["event"] == LogEvent.TERMINAL_COMMITTED for event in events)
+    (retry,) = [event for event in events if event["event"] == LogEvent.RETRY_SCHEDULED]
+    assert retry["job_id"] == retry_waiting.id
+    assert retry["attempt"] == 1
+    assert retry["status"] == "processing"
+    assert retry["error_code"] == LogError.STORAGE_READ_FAILED
 
 
 def test_result_commit_failure_schedules_retry_and_session_processes_next_job(
@@ -978,22 +1028,23 @@ def test_authenticated_upload_worker_and_readback_use_real_inference_path(
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     object_store = configure_local_image_storage(
         monkeypatch,
         tmp_path / "objects",
     )
     inference_service, extractor = create_test_inference_service(
-        tmp_path / "package",
+        tmp_path / "private-package-root",
         threshold=2.0,
     )
 
     queued_response = client.post(
-        "/predictions",
-        headers=auth_headers,
+        "/predictions?probe=private-query-marker",
+        headers={**auth_headers, "X-Request-ID": "private-request-marker"},
         files=image_upload(
             content=create_image_bytes("PNG"),
-            filename="tile.png",
+            filename="private-upload-marker.png",
             content_type="image/png",
         ),
     )
@@ -1066,6 +1117,53 @@ def test_authenticated_upload_worker_and_readback_use_real_inference_path(
     assert result["processing_started_at"] is not None
     assert result["completed_at"] is not None
     assert "image_path" not in result
+
+    raw, events = read_structured_logs(capsys)
+    token = auth_headers["Authorization"].removeprefix("Bearer ")
+    for private_value in (
+        token,
+        queued.image_object_key,
+        str(tmp_path),
+        tmp_path.as_posix(),
+        "private-query-marker",
+        "private-request-marker",
+        "private-upload-marker",
+        "private-package-root",
+    ):
+        if private_value in raw:
+            pytest.fail("The lifecycle logs contained a private fixture value")
+    assert [event["event"] for event in events] == [
+        LogEvent.STORAGE_WRITE,
+        LogEvent.ENQUEUE,
+        LogEvent.HTTP_REQUEST,
+        LogEvent.CLAIM,
+        LogEvent.STORAGE_READ,
+        LogEvent.INFERENCE,
+        LogEvent.TERMINAL_COMMITTED,
+        LogEvent.READBACK,
+        LogEvent.HTTP_REQUEST,
+    ]
+    write, enqueue, post, claim, read, inference, terminal, readback, get = events
+    assert write["request_id"] == enqueue["request_id"] == post["request_id"]
+    assert post["request_id"] is not None
+    assert post["route"] == "/predictions" and post["http_status"] == 202
+    assert write["job_id"] is None
+    assert enqueue["status"] == "queued"
+    for event in (enqueue, claim, read, inference, terminal, readback):
+        assert event["prediction_id"] == event["job_id"] == prediction_id
+    for event in (claim, read, inference, terminal):
+        assert event["service"] == "worker" and event["attempt"] == 1
+        assert event["request_id"] is None
+    assert inference["latency_ms"] == completed.latency_ms
+    assert terminal["status"] == readback["status"] == "completed"
+    assert (
+        inference["model_version"]
+        == terminal["model_version"]
+        == readback["model_version"]
+    )
+    assert terminal["model_version"] == completed.model_version
+    assert readback["request_id"] == get["request_id"] != post["request_id"]
+    assert get["route"] == "/predictions/{prediction_id}" and get["http_status"] == 200
 
 
 @pytest.mark.w6_inference_gate
@@ -1255,6 +1353,7 @@ def test_get_prediction_hides_other_users_prediction(
     client: TestClient,
     db: Session,
     test_user: User,
+    capsys: pytest.CaptureFixture[str],
 ):
     other_user = User(
         email="other@example.com",
@@ -1278,6 +1377,15 @@ def test_get_prediction_hides_other_users_prediction(
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Prediction job not found."
+
+    raw, events = read_structured_logs(capsys)
+    if token in raw:
+        pytest.fail("The lifecycle logs contained the test credential")
+    assert len(events) == 1
+    assert events[0]["event"] == LogEvent.HTTP_REQUEST
+    assert events[0]["route"] == "/predictions/{prediction_id}"
+    assert events[0]["http_status"] == 404
+    assert events[0]["prediction_id"] is None
 
 
 def test_admin_can_read_another_users_prediction(

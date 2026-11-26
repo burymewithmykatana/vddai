@@ -2,15 +2,18 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import auth, health, prediction
-from app.core.config import settings
-from app.core.logging import setup_logging
-from app.db.init_db import init_db
+from app.core.logging import guard_service_startup, setup_logging
+
+with guard_service_startup("api"):
+    from app.api.request_logging import RequestLoggingMiddleware
+    from app.api.routes import auth, health, prediction
+    from app.core.config import settings
+    from app.db.init_db import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    setup_logging()
+    setup_logging(api=True)
     init_db()
     yield
 
@@ -21,6 +24,7 @@ app = FastAPI(
     description="Visual Defect Detection AI backend made for upcoming awesome projects, summer 2026.",
     lifespan=lifespan,
 )
+app.add_middleware(RequestLoggingMiddleware)
 
 
 @app.get("/", tags=["root"])

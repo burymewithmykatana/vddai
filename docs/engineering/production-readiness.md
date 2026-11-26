@@ -159,6 +159,59 @@ and new worker versions together. A downgrade requires the ADR 0010/0011
 preconditions; do not use `docker compose down -v`, which deletes durable
 state, without explicit human authorization.
 
+## W9D1 prediction lifecycle logs
+
+The API and worker emit one JSON object per lifecycle event on standard
+output. Operators can follow a prediction from upload through queueing,
+inference, result persistence, and authorized readback.
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version`, `timestamp`, `level` | Schema version `1`, a UTC timestamp, and log severity. |
+| `service`, `event`, `status` | The API or worker, the lifecycle event, and its outcome or recorded prediction state. |
+| `request_id` | A server-generated ID for each HTTP request. Events on one API request share this ID. Worker events have a null request ID. |
+| `prediction_id`, `job_id`, `attempt` | Once known, both IDs carry the same PostgreSQL prediction ID. Worker attempts use the persisted attempt number. |
+| `model_version` | The serving package ID stored with a result. The selected registry version is reported by `GET /health/model`. |
+| `latency_ms` | Stage duration in milliseconds when available. Successful inference uses the latency recorded with the result. |
+| `method`, `route`, `http_status`, `error_code` | Bounded HTTP metadata, the registered route template, and the stable diagnostic code when available. |
+
+Fields appear as null when they are unavailable. Request headers, bodies,
+raw URLs, image object keys, and exception details stay outside the event
+schema. A denied or missing prediction read records the HTTP `404` with the
+route template and no prediction ID. On either service's normal entry point,
+an application initialization error during import emits
+`service.startup_failed` with `startup_failed` and exits with status `1`.
+
+### Follow one prediction
+
+Locate the upload in the API logs and use its `request_id` to find
+`prediction.enqueue`. Use the resulting `job_id` across the API and worker
+logs. The example uses synthetic identifiers and a fixture package ID.
+
+| Event | What to look for |
+| --- | --- |
+| `storage.write_finished` | Upload request `d25815019f0c47628e2a6a4b2112b671` stored an image. |
+| `prediction.enqueue` | The same request committed job `42` in state `queued`. |
+| `http.request_finished` | The upload request finished with `202` for `POST /predictions`. |
+| `prediction.claim` | The worker committed the claim for job `42`, attempt `1`. |
+| `storage.read_finished` | The worker read the image for job `42`. |
+| `prediction.inference` | Attempt `1` scored with fixture package `mvtec-tile-resnet18-knn-a6378e04c6442353`. |
+| `prediction.terminal_committed` | The worker committed the completed result and package identity. |
+| `prediction.readback` | Authorized request `09bed4bac54149caacc2fda01408f106` retrieved job `42` and its package identity. |
+| `http.request_finished` | The readback request finished with `200` for `GET /predictions/{prediction_id}`. |
+
+Use `attempt` to follow retry and recovery events. A committed retry emits
+`prediction.retry_scheduled` with status `processing`. A fenced completion
+emits `prediction.attempt_discarded`. If a result commit reports an error,
+`prediction.result_observed` records that the worker subsequently read a
+durable terminal result for the same attempt. The corresponding
+`prediction.settlement_failed` records the reported persistence error.
+An upload whose queue commit fails may also produce a
+`storage.orphan_cleanup` event on the upload's request ID.
+
+W9D1 review evidence is available in the
+[independent re-review](../reviews/2026-11-27-w9d1-correlated-logging-r2.md).
+
 ## Required commands
 
 From the repository root:

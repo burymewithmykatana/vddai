@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import time
 from functools import lru_cache
 from pathlib import Path
@@ -26,8 +25,6 @@ from app.services.model_package_loader import (
     resolve_production_model_selection,
 )
 from app.services.promoted_model_resolver import PromotedModelSelection
-
-logger = logging.getLogger(__name__)
 
 
 class AnomalyInferenceService:
@@ -72,15 +69,6 @@ class AnomalyInferenceService:
         )
         latency_ms = max(0, round((time.perf_counter() - started_at) * 1000))
 
-        logger.info(
-            "anomaly_inference_completed package_id=%s label=%s score=%s "
-            "threshold=%s latency_ms=%s",
-            self.package.package_id,
-            predicted_label,
-            score,
-            self.package.threshold,
-            latency_ms,
-        )
         return AnomalyInferenceResult(
             predicted_label=predicted_label,
             anomaly_score=score,

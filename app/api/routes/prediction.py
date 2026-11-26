@@ -1,4 +1,5 @@
-import logging
+from functools import partial
+from time import perf_counter_ns
 
 from fastapi import (
     APIRouter,
@@ -9,14 +10,16 @@ from fastapi import (
     UploadFile,
     status,
 )
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.core.config import settings
+from app.core.logging import LogError, LogEvent, elapsed_ms, log_event
 from app.models.prediction import Prediction, PredictionStatus
 from app.models.user import User
 from app.schemas import PredictionQueuedResponse, PredictionRead
-from app.services.image_storage_service import image_storage_service
+from app.services.image_storage_service import StoredImage, image_storage_service
 from app.services.prediction_admission_service import (
     PredictionAdmissionUnavailableError,
     PredictionGlobalCapacityExceededError,
@@ -25,7 +28,7 @@ from app.services.prediction_admission_service import (
     prediction_admission_service,
 )
 
-logger = logging.getLogger(__name__)
+_log = partial(log_event, service="api")
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
@@ -35,13 +38,45 @@ def _retry_after_header(seconds: int) -> dict[str, str]:
 
 
 def _delete_orphaned_image(object_key: str) -> None:
+    started_ns = perf_counter_ns()
     try:
         image_storage_service.delete(object_key)
     except Exception:
-        logger.exception(
-            "failed_to_delete_orphaned_image object_key=%s",
-            object_key,
+        _log(
+            LogEvent.STORAGE_CLEANUP,
+            status="error",
+            latency_ms=elapsed_ms(started_ns),
+            error_code=LogError.STORAGE_CLEANUP_FAILED,
         )
+    else:
+        _log(LogEvent.STORAGE_CLEANUP, status="ok", latency_ms=elapsed_ms(started_ns))
+
+
+def _store_prediction_image(image: UploadFile) -> StoredImage:
+    started_ns = perf_counter_ns()
+    try:
+        stored_image = image_storage_service.store(image)
+    except HTTPException as exc:
+        rejected = exc.status_code < 500
+        _log(
+            LogEvent.STORAGE_WRITE,
+            status="rejected" if rejected else "error",
+            latency_ms=elapsed_ms(started_ns),
+            error_code=(
+                LogError.UPLOAD_REJECTED if rejected else LogError.STORAGE_WRITE_FAILED
+            ),
+        )
+        raise
+    except Exception:
+        _log(
+            LogEvent.STORAGE_WRITE,
+            status="error",
+            latency_ms=elapsed_ms(started_ns),
+            error_code=LogError.STORAGE_WRITE_FAILED,
+        )
+        raise
+    _log(LogEvent.STORAGE_WRITE, status="ok", latency_ms=elapsed_ms(started_ns))
+    return stored_image
 
 
 @router.post(
@@ -55,6 +90,7 @@ def create_prediction_job(
     db: Session = Depends(get_db),
 ) -> PredictionQueuedResponse:
     user_id = current_user.id
+    started_ns = perf_counter_ns()
     try:
         prediction_admission_service.consume_request_slot(
             db,
@@ -63,6 +99,12 @@ def create_prediction_job(
         db.commit()
     except PredictionRequestRateExceededError as exc:
         db.rollback()
+        _log(
+            LogEvent.ENQUEUE,
+            status="rejected",
+            latency_ms=elapsed_ms(started_ns),
+            error_code=LogError.RATE_LIMITED,
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Prediction request rate limit exceeded. Retry later.",
@@ -70,7 +112,12 @@ def create_prediction_job(
         ) from exc
     except PredictionAdmissionUnavailableError as exc:
         db.rollback()
-        logger.exception("prediction_rate_admission_unavailable user_id=%s", user_id)
+        _log(
+            LogEvent.ENQUEUE,
+            status="error",
+            latency_ms=elapsed_ms(started_ns),
+            error_code=LogError.ADMISSION_UNAVAILABLE,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Prediction service is temporarily unavailable. Retry later.",
@@ -79,8 +126,9 @@ def create_prediction_job(
             ),
         ) from exc
 
-    stored_image = image_storage_service.store(image)
+    stored_image = _store_prediction_image(image)
 
+    started_ns = perf_counter_ns()
     try:
         prediction = prediction_admission_service.admit_prediction(
             db,
@@ -91,6 +139,12 @@ def create_prediction_job(
     except PredictionUserOutstandingExceededError as exc:
         db.rollback()
         _delete_orphaned_image(stored_image.object_key)
+        _log(
+            LogEvent.ENQUEUE,
+            status="rejected",
+            latency_ms=elapsed_ms(started_ns),
+            error_code=LogError.USER_CAPACITY,
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many outstanding prediction jobs. Retry later.",
@@ -99,6 +153,12 @@ def create_prediction_job(
     except PredictionGlobalCapacityExceededError as exc:
         db.rollback()
         _delete_orphaned_image(stored_image.object_key)
+        _log(
+            LogEvent.ENQUEUE,
+            status="rejected",
+            latency_ms=elapsed_ms(started_ns),
+            error_code=LogError.GLOBAL_CAPACITY,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Prediction service is temporarily at capacity. Retry later.",
@@ -107,7 +167,12 @@ def create_prediction_job(
     except PredictionAdmissionUnavailableError as exc:
         db.rollback()
         _delete_orphaned_image(stored_image.object_key)
-        logger.exception("prediction_queue_admission_unavailable user_id=%s", user_id)
+        _log(
+            LogEvent.ENQUEUE,
+            status="error",
+            latency_ms=elapsed_ms(started_ns),
+            error_code=LogError.ADMISSION_UNAVAILABLE,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Prediction service is temporarily unavailable. Retry later.",
@@ -118,20 +183,22 @@ def create_prediction_job(
     except Exception:
         db.rollback()
         _delete_orphaned_image(stored_image.object_key)
+        _log(
+            LogEvent.ENQUEUE,
+            status="error",
+            latency_ms=elapsed_ms(started_ns),
+            error_code=LogError.ENQUEUE_FAILED,
+        )
         raise
 
-    db.refresh(prediction)
-
-    logger.info(
-        "prediction_job_created prediction_id=%s user_id=%s"
-        " image_object_key=%s image_format=%s image_width=%s image_height=%s",
-        prediction.id,
-        prediction.user_id,
-        prediction.image_object_key,
-        prediction.image_format,
-        prediction.image_width,
-        prediction.image_height,
+    identity = inspect(prediction).identity
+    _log(
+        LogEvent.ENQUEUE,
+        status=PredictionStatus.QUEUED.value,
+        prediction_id=identity[0] if identity else None,
+        latency_ms=elapsed_ms(started_ns),
     )
+    db.refresh(prediction)
 
     return PredictionQueuedResponse(
         prediction_id=prediction.id,
@@ -168,6 +235,7 @@ def get_prediction_job(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PredictionRead:
+    started_ns = perf_counter_ns()
     prediction = db.get(Prediction, prediction_id)
 
     if prediction is None:
@@ -182,4 +250,11 @@ def get_prediction_job(
             detail="Prediction job not found.",
         )
 
+    _log(
+        LogEvent.READBACK,
+        status=prediction.status,
+        prediction_id=prediction.id,
+        model_version=prediction.model_version,
+        latency_ms=elapsed_ms(started_ns),
+    )
     return prediction
