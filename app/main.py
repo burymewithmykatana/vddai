@@ -9,13 +9,20 @@ with guard_service_startup("api"):
     from app.api.routes import auth, health, prediction
     from app.core.config import settings
     from app.db.init_db import init_db
+    from app.db.session import SessionLocal
+    from app.services.metrics_service import ApiMetrics, serve_metrics
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(api=True)
     init_db()
-    yield
+    with serve_metrics(settings, "api", lambda: ApiMetrics(SessionLocal)) as metrics:
+        app.state.api_metrics = metrics
+        try:
+            yield
+        finally:
+            app.state.api_metrics = None
 
 
 app = FastAPI(

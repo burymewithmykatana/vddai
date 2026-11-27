@@ -29,6 +29,7 @@ class LogEvent(StrEnum):
     WORKER_ERROR = "worker.error"
     SERVER_ERROR = "server.error"
     STARTUP_FAILED = "service.startup_failed"
+    METRICS_UNAVAILABLE = "service.metrics_unavailable"
 
 
 class LogError(StrEnum):
@@ -55,6 +56,7 @@ class LogError(StrEnum):
     SETTLEMENT_FAILED = "settlement_failed"
     WORKER_ERROR = "worker_error"
     STARTUP_FAILED = "startup_failed"
+    METRICS_UNAVAILABLE = "metrics_unavailable"
 
 
 request_id_context: ContextVar[str | None] = ContextVar(

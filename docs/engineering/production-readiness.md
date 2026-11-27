@@ -212,6 +212,50 @@ An upload whose queue commit fails may also produce a
 W9D1 review evidence is available in the
 [independent re-review](../reviews/2026-11-27-w9d1-correlated-logging-r2.md).
 
+## W9D2 service and queue metrics
+
+The API and worker each serve a private Prometheus registry when
+`METRICS_ENABLED=true`. The default is `false`. With
+`METRICS_BIND_MODE=loopback` (the default), the listeners bind to
+`127.0.0.1`. The default ports are `9108` for the API
+(`METRICS_API_PORT`) and `9109` for the worker (`METRICS_WORKER_PORT`).
+An operator on the same host can check an enabled loopback listener with
+`curl http://127.0.0.1:9108/metrics` or
+`curl http://127.0.0.1:9109/metrics`. The application’s public API
+`/metrics` path continues to return `404`.
+
+The `container` bind mode resolves the process hostname and requires one
+IPv4 address in the private `10/8`, `172.16/12`, or `192.168/16` ranges.
+Keep that listener reachable only on the approved internal network. These
+listeners use HTTP and rely on network isolation for access control.
+Listener startup errors produce the safe `service.metrics_unavailable`
+diagnostic. The API or worker can continue running while its metrics are
+unavailable. Treat an unreachable listener as missing telemetry and check the
+service health separately. See
+[ADR 0015](../decisions/0015-private-observability.md) for the boundary.
+
+| Listener | Metric | Interpretation |
+| --- | --- | --- |
+| API | `vddai_api_ready` | The API completed startup. |
+| API | `vddai_http_requests_total`, `vddai_http_request_duration_seconds` | Request counts and duration by bounded method, registered route template, and HTTP status class. Unmatched routes share one label and unfinished responses count as `5xx`. |
+| API | `vddai_database_ready`, `vddai_queue_depth`, `vddai_queue_oldest_age_seconds` | A successful read reports depth and seconds since the oldest acceptance for `queued`, `active`, and `retry_waiting`. Active includes expired claims awaiting recovery. Empty states have zero depth and age. A DB error reports readiness zero and omits queue values. An overlapping snapshot omits the database and queue metrics for that scrape. |
+| Worker | `vddai_worker_ready`, `vddai_worker_model_ready` | Worker readiness reflects the latest recovery and claim poll. Model readiness is unknown (`NaN`) before an observed model initialization failure or successful inference. |
+| Worker | `vddai_job_claims_total`, `vddai_job_retries_scheduled_total`, `vddai_job_terminal_total` | Counts of committed claims, retry schedules, and observed terminal commits. |
+| Worker | `vddai_job_duration_seconds`, `vddai_inference_duration_seconds` | Histograms for acceptance through acknowledged terminal commit and successful inference using its frozen latency boundary. A terminal result found after an ambiguous commit does not create a duration sample or increment the terminal counter. |
+| Worker | `vddai_job_execution_failures_total` | Failed attempts by bounded stage (`model`, `storage`, or `inference`). Use terminal job status to count failed jobs. |
+
+The API collects queue state with one grouped read query. PostgreSQL applies a
+one second statement timeout to this snapshot. Metrics are process local and
+counters reset on restart. Labels and diagnostics exclude user identifiers,
+job identifiers, raw URLs, uploaded image content, and secrets.
+
+Pilot targets are p95 API latency at most **1 second**, p95 latency from job
+acceptance through terminal commit at most **15 seconds**, p95 inference
+latency at most **5 seconds**, and unexpected failures at most **1%**.
+Assess those targets from an explicit workload. The W9D2
+[independent re-review](../reviews/2026-11-27-w9d2-service-metrics-r2.md)
+and `W9D2-QA-2026-11-27-001` verify the signals and their failure behavior.
+
 ## Required commands
 
 From the repository root:

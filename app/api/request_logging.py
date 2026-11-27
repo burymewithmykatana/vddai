@@ -11,6 +11,7 @@ from app.core.logging import (
     log_event,
     request_id_context,
 )
+from app.services.metrics_service import log_metrics_failure
 
 
 class RequestLoggingMiddleware:
@@ -38,6 +39,8 @@ class RequestLoggingMiddleware:
             finished = True
         finally:
             route = scope.get("route")
+            route_path = route.path if isinstance(route, APIRoute) else None
+            duration_ms = elapsed_ms(started_ns)
             outcome = "error"
             if finished and http_status is not None and http_status < 500:
                 outcome = "rejected" if http_status >= 400 else "ok"
@@ -46,11 +49,24 @@ class RequestLoggingMiddleware:
                     LogEvent.HTTP_REQUEST,
                     service="api",
                     status=outcome,
-                    latency_ms=elapsed_ms(started_ns),
+                    latency_ms=duration_ms,
                     error_code=LogError.REQUEST_FAILED if outcome == "error" else None,
                     method=scope["method"],
-                    route=route.path if isinstance(route, APIRoute) else None,
+                    route=route_path,
                     http_status=http_status,
                 )
+                app_state = getattr(scope.get("app"), "state", None)
+                metrics = getattr(app_state, "api_metrics", None)
+                if metrics is not None:
+                    try:
+                        metrics.record_request(
+                            scope["method"],
+                            route_path,
+                            http_status,
+                            duration_ms,
+                            finished=finished,
+                        )
+                    except Exception:
+                        log_metrics_failure("api")
             finally:
                 request_id_context.reset(token)

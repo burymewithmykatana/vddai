@@ -100,3 +100,7 @@ documents:
     area: decisions
     kind: architecture-decision
     status: accepted
+  - path: docs/decisions/0015-private-observability.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted

@@ -19,6 +19,7 @@ their status or an amendment explicitly says otherwise.
 | [`0012`](0012-immutable-application-image-publication.md) | Accepted; amended by ADR 0014 | Immutable application image publication |
 | [`0013`](0013-temporary-ecdsa-audit-exception.md) | Accepted | Temporary ECDSA dependency-audit exception |
 | [`0014`](0014-single-host-staging-environment.md) | Accepted | Reproducible single-host staging environment |
+| [`0015`](0015-private-observability.md) | Accepted | Private service metrics |
 
 Create the next zero-padded number for a new decision. Preserve historical
 context, record consequences, and mark replaced decisions as superseded rather

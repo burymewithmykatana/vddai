@@ -3,7 +3,6 @@ import math
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
-from functools import partial
 from typing import Protocol
 
 from sqlalchemy import and_, or_
@@ -31,10 +30,54 @@ with guard_service_startup("worker") if __name__ == "__main__" else nullcontext(
         StoredImageNotFoundError,
         image_storage_service,
     )
+    from app.services.metrics_service import (
+        WorkerMetrics,
+        log_metrics_failure,
+        serve_metrics,
+        worker_metrics,
+    )
     from app.services.model_package_loader import ModelPackageError
     from app.services.promoted_model_resolver import PromotedModelResolutionError
 
-_log = partial(log_event, service="worker")
+
+def _log(
+    event: LogEvent,
+    *,
+    status: str,
+    attempt: int | None = None,
+    latency_ms: int | None = None,
+    error_code: LogError | None = None,
+    job_duration_seconds: float | None = None,
+    **fields,
+) -> None:
+    log_event(
+        event,
+        service="worker",
+        status=status,
+        attempt=attempt,
+        latency_ms=latency_ms,
+        error_code=error_code,
+        **fields,
+    )
+    metrics = worker_metrics.get()
+    if metrics is not None:
+        try:
+            metrics.record_event(
+                event,
+                status=status,
+                attempt=attempt,
+                latency_ms=latency_ms,
+                error_code=error_code,
+                job_duration_seconds=job_duration_seconds,
+            )
+        except Exception:
+            log_metrics_failure("worker")
+
+
+def _job_duration_seconds(created_at: dt.datetime) -> float | None:
+    if worker_metrics.get() is None:
+        return None
+    return max(0.0, (_utc_now_naive() - created_at).total_seconds())
 
 
 class InferenceService(Protocol):
@@ -97,6 +140,7 @@ def _log_attempt(
     latency_ms: int,
     model_version: str | None = None,
     error_code: LogError | None = None,
+    job_duration_seconds: float | None = None,
 ) -> None:
     _log(
         event,
@@ -106,6 +150,7 @@ def _log_attempt(
         attempt=claim.attempt,
         model_version=model_version,
         error_code=error_code,
+        job_duration_seconds=job_duration_seconds,
     )
 
 
@@ -116,6 +161,7 @@ def _log_failure_outcome(
     attempt: int,
     started_ns: int,
     error_code: LogError,
+    job_created_at: dt.datetime,
 ) -> None:
     retry = action == "retry_scheduled"
     _log(
@@ -129,6 +175,7 @@ def _log_failure_outcome(
         prediction_id=prediction_id,
         attempt=attempt,
         error_code=error_code,
+        job_duration_seconds=None if retry else _job_duration_seconds(job_created_at),
     )
 
 
@@ -280,6 +327,7 @@ def _recover_one_stale_prediction(
         now=now,
         retry_policy=retry_policy,
     )
+    job_created_at = prediction.created_at
     try:
         db.commit()
     except SQLAlchemyError:
@@ -300,6 +348,7 @@ def _recover_one_stale_prediction(
         attempt=attempt,
         started_ns=started_ns,
         error_code=LogError.LEASE_EXPIRED,
+        job_created_at=job_created_at,
     )
     return True
 
@@ -347,6 +396,7 @@ def _claim_next_prediction(
                 ),
                 at=now,
             )
+            job_created_at = prediction.created_at
             db.commit()
             _log_failure_outcome(
                 "failed",
@@ -354,6 +404,7 @@ def _claim_next_prediction(
                 attempt=attempt,
                 started_ns=started_ns,
                 error_code=LogError.RETRY_LIMIT,
+                job_created_at=job_created_at,
             )
             return None
         attempt = prediction.start_processing(
@@ -447,6 +498,7 @@ def _settle_execution_failure(
                 at=now,
             )
             action = "failed"
+        job_created_at = prediction.created_at
         db.commit()
         _log_failure_outcome(
             action,
@@ -454,6 +506,7 @@ def _settle_execution_failure(
             attempt=claim.attempt,
             started_ns=started_ns,
             error_code=LogError.LEASE_EXPIRED if lease_expired else error_code,
+            job_created_at=job_created_at,
         )
     except (SQLAlchemyError, ValueError):
         db.rollback()
@@ -500,6 +553,7 @@ def _reconcile_result_commit_error(
             now=now,
             retry_policy=retry_policy,
         )
+        job_created_at = prediction.created_at
         db.commit()
         _log_failure_outcome(
             action,
@@ -507,6 +561,7 @@ def _reconcile_result_commit_error(
             attempt=claim.attempt,
             started_ns=started_ns,
             error_code=LogError.RESULT_COMMIT_FAILED,
+            job_created_at=job_created_at,
         )
     except (SQLAlchemyError, ValueError):
         db.rollback()
@@ -554,6 +609,7 @@ def _persist_success(
                 now=now,
                 retry_policy=retry_policy,
             )
+            job_created_at = prediction.created_at
             db.commit()
             _log_failure_outcome(
                 action,
@@ -561,6 +617,7 @@ def _persist_success(
                 attempt=claim.attempt,
                 started_ns=started_ns,
                 error_code=LogError.LEASE_EXPIRED,
+                job_created_at=job_created_at,
             )
             return False
 
@@ -570,6 +627,7 @@ def _persist_success(
             at=now,
         )
         status = prediction.status
+        job_created_at = prediction.created_at
         db.commit()
         _log_attempt(
             LogEvent.TERMINAL_COMMITTED,
@@ -577,6 +635,7 @@ def _persist_success(
             status=status,
             latency_ms=elapsed_ms(started_ns),
             model_version=result.model_version,
+            job_duration_seconds=_job_duration_seconds(job_created_at),
         )
         return True
     except SQLAlchemyError as exc:
@@ -605,28 +664,30 @@ def process_next_prediction(
     retry_policy: PredictionRetryPolicy | None = None,
 ) -> bool:
     policy = retry_policy or _configured_retry_policy()
-    started_ns = time.perf_counter_ns()
-    try:
-        _recover_one_stale_prediction(
+    metrics = worker_metrics.get()
+    with metrics.observe_poll() if metrics is not None else nullcontext():
+        started_ns = time.perf_counter_ns()
+        try:
+            _recover_one_stale_prediction(
+                db,
+                now=_utc_now_naive(),
+                retry_policy=policy,
+            )
+        except (SQLAlchemyError, ValueError):
+            db.rollback()
+            _log(
+                LogEvent.SETTLEMENT_FAILED,
+                status="error",
+                latency_ms=elapsed_ms(started_ns),
+                error_code=LogError.RECOVERY_FAILED,
+            )
+            return False
+
+        claim = _claim_next_prediction(
             db,
             now=_utc_now_naive(),
             retry_policy=policy,
         )
-    except (SQLAlchemyError, ValueError):
-        db.rollback()
-        _log(
-            LogEvent.SETTLEMENT_FAILED,
-            status="error",
-            latency_ms=elapsed_ms(started_ns),
-            error_code=LogError.RECOVERY_FAILED,
-        )
-        return False
-
-    claim = _claim_next_prediction(
-        db,
-        now=_utc_now_naive(),
-        retry_policy=policy,
-    )
     if claim is None:
         return False
 
@@ -720,7 +781,12 @@ def main() -> None:
 
     setup_logging()
     try:
-        run_forever(settings.WORKER_POLL_INTERVAL_SECONDS)
+        with serve_metrics(settings, "worker", WorkerMetrics) as metrics:
+            token = worker_metrics.set(metrics)
+            try:
+                run_forever(settings.WORKER_POLL_INTERVAL_SECONDS)
+            finally:
+                worker_metrics.reset(token)
     except Exception:
         _log(
             LogEvent.WORKER_ERROR,
