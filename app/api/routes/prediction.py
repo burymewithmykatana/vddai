@@ -7,6 +7,7 @@ from fastapi import (
     File,
     HTTPException,
     Query,
+    Request,
     UploadFile,
     status,
 )
@@ -20,6 +21,7 @@ from app.models.prediction import Prediction, PredictionStatus
 from app.models.user import User
 from app.schemas import PredictionQueuedResponse, PredictionRead
 from app.services.image_storage_service import StoredImage, image_storage_service
+from app.services.metrics_service import log_metrics_failure
 from app.services.prediction_admission_service import (
     PredictionAdmissionUnavailableError,
     PredictionGlobalCapacityExceededError,
@@ -85,6 +87,7 @@ def _store_prediction_image(image: UploadFile) -> StoredImage:
     status_code=status.HTTP_202_ACCEPTED,
 )
 def create_prediction_job(
+    request: Request,
     image: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -126,7 +129,16 @@ def create_prediction_job(
             ),
         ) from exc
 
-    stored_image = _store_prediction_image(image)
+    metrics = getattr(request.app.state, "api_metrics", None)
+    try:
+        stored_image = _store_prediction_image(image)
+    except HTTPException as exc:
+        if metrics is not None and 400 <= exc.status_code < 500:
+            try:
+                metrics.record_rejected_upload(exc.status_code)
+            except Exception:
+                log_metrics_failure("api")
+        raise
 
     started_ns = perf_counter_ns()
     try:
@@ -191,6 +203,11 @@ def create_prediction_job(
         )
         raise
 
+    if metrics is not None:
+        try:
+            metrics.record_upload(stored_image)
+        except Exception:
+            log_metrics_failure("api")
     identity = inspect(prediction).identity
     _log(
         LogEvent.ENQUEUE,

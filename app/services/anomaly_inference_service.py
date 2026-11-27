@@ -17,6 +17,7 @@ from app.services.image_preprocessing_service import (
     ImagePreprocessingService,
     image_preprocessing_service,
 )
+from app.services.metrics_service import log_metrics_failure
 from app.services.model_package_loader import (
     ModelPackageCompatibilityError,
     ModelPackageError,
@@ -25,6 +26,7 @@ from app.services.model_package_loader import (
     resolve_production_model_selection,
 )
 from app.services.promoted_model_resolver import PromotedModelSelection
+from app.services.quality_monitor import quality_observer
 
 
 class AnomalyInferenceService:
@@ -69,7 +71,7 @@ class AnomalyInferenceService:
         )
         latency_ms = max(0, round((time.perf_counter() - started_at) * 1000))
 
-        return AnomalyInferenceResult(
+        result = AnomalyInferenceResult(
             predicted_label=predicted_label,
             anomaly_score=score,
             threshold=self.package.threshold,
@@ -77,6 +79,13 @@ class AnomalyInferenceService:
             model_lineage=self.package.lineage,
             latency_ms=latency_ms,
         )
+        observe = quality_observer.get()
+        if observe is not None:
+            try:
+                observe(preprocessed, result)
+            except Exception:
+                log_metrics_failure("worker")
+        return result
 
 
 @lru_cache(maxsize=2)

@@ -256,6 +256,88 @@ Assess those targets from an explicit workload. The W9D2
 [independent re-review](../reviews/2026-11-27-w9d2-service-metrics-r2.md)
 and `W9D2-QA-2026-11-27-001` verify the signals and their failure behavior.
 
+## W9D3 input and model quality
+
+The private API listener reports committed uploads through
+`vddai_upload_accepted_total` and original width and height through
+`vddai_upload_dimension_pixels`. It counts image validation rejections in
+`vddai_upload_validation_rejected_total` by bounded status. Queue rollback
+leaves the accepted upload count unchanged.
+
+The private worker listener summarizes successful inference attempts in the
+current and previous 59 minute buckets. It records image format, original
+width and height, the mean and standard deviation of normalized RGB pixels,
+anomaly score bins, anomaly rate, and the observed package ID. The observer
+runs after inference measures its latency. A retry can produce another
+observation if it also scores successfully. Only bin counts and sums remain
+in memory. The monitor discards expired buckets and retains no images,
+paths, prediction identifiers, or individual scores.
+
+### Build the reference
+
+Run the offline builder with an explicit frozen package, its training feature
+bank, the matching canonical dataset manifest, and the local dataset root.
+Use the existing local `TORCH_HOME` cache for the frozen ResNet-18 weights.
+
+```powershell
+python -m ml.build_quality_reference `
+  --package-manifest "<package>/run_manifest.json" `
+  --feature-bank "<feature-bank-directory>" `
+  --dataset-manifest "<dataset-manifest.json>" `
+  --dataset-root "<dataset-root>" |
+  Set-Content -Encoding utf8 "<private-directory>/quality-reference.json"
+```
+
+Keep the generated aggregate JSON outside Git. The builder checks the package
+and manifest fingerprint, rejects duplicate sample IDs and canonical image
+paths across splits, and compares decoded format, size, and mode to each
+normal validation record. It reads image bytes only from the matched normal
+validation split. The reference is specific to its package, dataset manifest,
+and preprocessing version. The manifest fingerprints its recorded metadata.
+
+Set `METRICS_QUALITY_REFERENCE_FILE` to the reference path readable by the
+worker when enabling private metrics. Synthetic fixture references are
+accepted only with `ENVIRONMENT=test`. A comparison requires at least 30
+matched reference observations and 30 observations from the current window.
+A missing, invalid, mismatched, or mixed window has
+`vddai_quality_comparison_ready=0` and emits no warning samples. The monitor
+waits for the older model's observation bucket to expire before comparing
+after a switch. `vddai_quality_reference_count` identifies the loaded
+reference source and its count.
+
+### Interpret a shift
+
+| Signal | Warning when comparison is ready |
+| --- | --- |
+| `pixel_mean` | Mean normalized RGB level differs from the reference by at least 0.15. |
+| `pixel_contrast` | Average per-image RGB standard deviation differs by at least 0.10. |
+| `format_mix` | A format's share differs by at least 20 percentage points. |
+| `anomaly_rate` | The anomaly label rate differs by at least 20 percentage points. |
+| `score_p95` | The nearest-rank 95th percentile exceeds 1.5 times the reference p95. |
+
+Use `vddai_quality_shift_warning{signal="..."}` or capture one private
+worker scrape and summarize it locally:
+
+```powershell
+curl.exe --fail --silent http://127.0.0.1:9109/metrics --output "<private-directory>/worker-metrics.txt"
+python -m scripts.report_quality_shift "<private-directory>/worker-metrics.txt"
+```
+
+A report with an available comparison and an empty warning list indicates
+the thresholds were clear. The report uses `warnings: null` when comparison
+is unavailable. These provisional warnings describe aggregate change. Start
+by checking the sample count, package identity, and upload mix. The serving
+classifier and its approved threshold continue to govern predictions.
+
+The local frozen package `mvtec-tile-resnet18-knn-fe64db2228370b2d` produced
+a 46-image matched reference. The controlled validation replay produced no
+warnings, while 30 shifted synthetic JPEG observations triggered all five.
+See the [independent re-review](../reviews/2026-11-27-w9d3-quality-monitoring-r2.md)
+for the reviewed subject and closure evidence.
+
+Independent QA `W9D3-QA-2026-11-27-001` matched the frozen reference
+and verified the private scrape, rollback, and report behavior.
+
 ## Required commands
 
 From the repository root:

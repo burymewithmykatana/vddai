@@ -26,6 +26,13 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.core.logging import LogError, LogEvent, log_event
 from app.models.prediction import Prediction, PredictionStatus
+from app.services.image_storage_service import StoredImage
+from app.services.quality_monitor import (
+    DIMENSION_BOUNDS,
+    QualityReference,
+    QualityWindow,
+    monitored_format,
+)
 
 HTTP_METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
 QUEUE_STATES = ("queued", "active", "retry_waiting")
@@ -121,10 +128,39 @@ class ApiMetrics:
             buckets=REQUEST_BUCKETS,
             registry=self.registry,
         )
+        self._upload_formats = Counter(
+            "vddai_upload_accepted_total",
+            "Committed uploads by validated image format.",
+            ("format",),
+            registry=self.registry,
+        )
+        self._upload_dimensions = Histogram(
+            "vddai_upload_dimension_pixels",
+            "Original image dimension of committed uploads.",
+            ("axis",),
+            buckets=DIMENSION_BOUNDS,
+            registry=self.registry,
+        )
+        self._upload_rejected = Counter(
+            "vddai_upload_validation_rejected_total",
+            "Image validation rejections by bounded HTTP status.",
+            ("status",),
+            registry=self.registry,
+        )
         Gauge(
             "vddai_api_ready", "The API has completed startup.", registry=self.registry
         ).set(1)
         self.registry.register(QueueCollector(session_factory))
+
+    def record_upload(self, image: StoredImage) -> None:
+        self._upload_formats.labels(monitored_format(image.format)).inc()
+        self._upload_dimensions.labels("width").observe(image.width)
+        self._upload_dimensions.labels("height").observe(image.height)
+
+    def record_rejected_upload(self, status: int) -> None:
+        self._upload_rejected.labels(
+            str(status) if status in (400, 413, 415) else "other"
+        ).inc()
 
     def record_request(
         self,
@@ -145,8 +181,10 @@ class ApiMetrics:
 
 
 class WorkerMetrics:
-    def __init__(self) -> None:
+    def __init__(self, quality_reference: QualityReference | None = None) -> None:
         self.registry = registry = CollectorRegistry()
+        self.quality = QualityWindow(quality_reference)
+        registry.register(self.quality)
         self._ready = Gauge(
             "vddai_worker_ready",
             "The latest observed queue poll succeeded.",

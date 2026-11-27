@@ -37,6 +37,7 @@ from app.services.image_storage_service import (
     StoredObject,
     image_storage_service,
 )
+from app.services.metrics_service import ApiMetrics
 from app.services.model_package_loader import (
     ModelPackageLoader,
     reset_model_package_cache_for_tests,
@@ -283,6 +284,51 @@ def test_create_prediction_job(
     assert object_store.read(prediction.image_object_key) == image_contents
 
 
+def test_upload_metrics_count_committed_validation_outcomes(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configure_local_image_storage(monkeypatch, tmp_path / "objects")
+    metrics = ApiMetrics(SessionLocal)
+    monkeypatch.setattr(app.state, "api_metrics", metrics)
+    assert (
+        client.post(
+            "/predictions", headers=auth_headers, files=image_upload(b"invalid image")
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/predictions",
+            headers=auth_headers,
+            files=image_upload(create_image_bytes(size=(31, 17))),
+        ).status_code
+        == 202
+    )
+    samples = metrics.registry
+    assert (
+        samples.get_sample_value("vddai_upload_accepted_total", {"format": "jpeg"}) == 1
+    )
+    assert (
+        samples.get_sample_value(
+            "vddai_upload_validation_rejected_total", {"status": "400"}
+        )
+        == 1
+    )
+    assert (
+        samples.get_sample_value("vddai_upload_dimension_pixels_sum", {"axis": "width"})
+        == 31
+    )
+    assert (
+        samples.get_sample_value(
+            "vddai_upload_dimension_pixels_sum", {"axis": "height"}
+        )
+        == 17
+    )
+
+
 def test_repeated_prediction_posts_create_distinct_jobs(
     client: TestClient,
     db: Session,
@@ -332,6 +378,8 @@ def test_create_prediction_commit_failure_removes_orphaned_upload(
         monkeypatch,
         tmp_path / "objects",
     )
+    upload_metrics = ApiMetrics(SessionLocal)
+    monkeypatch.setattr(app.state, "api_metrics", upload_metrics)
     deleted_keys: list[str] = []
     real_delete = object_store.delete
 
@@ -371,6 +419,12 @@ def test_create_prediction_commit_failure_removes_orphaned_upload(
     assert deleted_keys[0].startswith("predictions/")
     assert not any(path.is_file() for path in (tmp_path / "objects").rglob("*"))
     assert db.query(Prediction).count() == 0
+    assert (
+        upload_metrics.registry.get_sample_value(
+            "vddai_upload_accepted_total", {"format": "jpeg"}
+        )
+        is None
+    )
 
     raw, events = read_structured_logs(capsys)
     assert "simulated queue commit failure" not in raw

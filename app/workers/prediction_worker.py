@@ -38,6 +38,7 @@ with guard_service_startup("worker") if __name__ == "__main__" else nullcontext(
     )
     from app.services.model_package_loader import ModelPackageError
     from app.services.promoted_model_resolver import PromotedModelResolutionError
+    from app.services.quality_monitor import quality_observer, read_quality_reference
 
 
 def _log(
@@ -781,11 +782,24 @@ def main() -> None:
 
     setup_logging()
     try:
-        with serve_metrics(settings, "worker", WorkerMetrics) as metrics:
+
+        def create_metrics() -> WorkerMetrics:
+            return WorkerMetrics(
+                read_quality_reference(
+                    settings.METRICS_QUALITY_REFERENCE_FILE,
+                    allow_synthetic=settings.ENVIRONMENT == "test",
+                )
+            )
+
+        with serve_metrics(settings, "worker", create_metrics) as metrics:
             token = worker_metrics.set(metrics)
+            quality_token = quality_observer.set(
+                metrics.quality.observe if metrics else None
+            )
             try:
                 run_forever(settings.WORKER_POLL_INTERVAL_SECONDS)
             finally:
+                quality_observer.reset(quality_token)
                 worker_metrics.reset(token)
     except Exception:
         _log(
