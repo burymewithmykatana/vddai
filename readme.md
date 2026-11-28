@@ -22,6 +22,7 @@ detector tied to one product category.
 | Understand prediction retries and recovery | [Prediction reliability and recovery](#prediction-reliability-and-recovery) and [ADR 0010](docs/decisions/0010-database-backed-prediction-reliability.md) |
 | Prove the complete inference flow | [W6D1 inference gate](#w6d1-reproducible-real-inference-gate) |
 | Run the production security and reliability gate | [W7D4 production gate](#w7d4-production-security-and-reliability-gate) and [risk register](docs/engineering/production-readiness.md) |
+| Run the disposable pilot workload | [W9D5 local pilot soak](#w9d5-local-pilot-soak) |
 | Track and query the Week 4 baseline | [Week 6 experiment tracking](#week-6-experiment-tracking) |
 | Reproduce the data and model baseline | [MVTec AD dataset](#mvtec-ad-tile-dataset) and [Week 4 baseline](#week-4-complete) |
 | Understand image transformations | [Image preprocessing contract](#image-preprocessing-contract) |
@@ -433,9 +434,8 @@ dependencies with `pip-audit==2.10.1` and build/inspect the immutable
 application image without publishing it. The audit reports known Python
 dependency vulnerabilities only; it is not an image scan, SBOM, provenance
 attestation, signing mechanism, or application-security proof.
-The audit remains strict except for the exact temporary ECDSA advisory accepted
-in [ADR 0013](docs/decisions/0013-temporary-ecdsa-audit-exception.md); every
-other finding blocks the quality gate.
+The audit runs in strict mode and every reported finding blocks the quality
+gate. [ADR 0016](docs/decisions/0016-hs256-jwt-provider-and-strict-audit.md)
 
 `VDDAI v0.1.0 quality gate` is the stable aggregate check intended for future
 branch protection. It is green only when every mandatory upstream job succeeds;
@@ -487,6 +487,35 @@ uploads, certificates, and model artifacts on the approved single host. Follow
 the [staging procedure](docs/engineering/production-readiness.md#w8d3-staging-environment)
 and invoke `python scripts/run_staging_compose.py`; do not use development
 Compose for a public staging endpoint.
+
+## W9D5 local pilot soak
+
+Use a disposable development Compose project with its own PostgreSQL database,
+upload storage, and container names. Publish the API only on IPv4 loopback.
+Set `PROJECT_NAME` to a unique `vddai-w9d5-` name followed by 6 to 40 lowercase
+letters, digits, or hyphens. Provision the selected frozen package and its
+dependencies read-only. Use the private monitoring overlay when collecting
+queue and resource measurements. [Pilot monitoring runbook](docs/engineering/monitoring-runbook.md)
+
+Set `$LocalPilotPort`, `$LocalPilotService`, and `$LocalPilotPackageId` to the
+verified loopback port, `PROJECT_NAME`, and selected package ID. Run from the
+repository root with the pinned Python environment.
+
+```powershell
+$report = Join-Path $env:TEMP "vddai-w9d5-$([guid]::NewGuid().ToString('N')).json"
+python -m scripts.run_local_pilot_soak `
+  --port $LocalPilotPort `
+  --expected-service $LocalPilotService `
+  --package-id $LocalPilotPackageId `
+  --report $report
+```
+
+The runner checks the development service, database health, and model selection
+before it creates two synthetic users. It stops at the first unexpected failure
+and writes an aggregate receipt to the new report path. Retain that receipt and
+the private aggregate monitoring evidence. Use the approved fixture teardown
+to remove the disposable stack, database, and stored synthetic inputs after
+evidence capture. [Measured workload and pilot capacity](docs/engineering/production-readiness.md#w9d5-local-pilot-capacity)
 
 ## Image Preprocessing Contract
 
@@ -550,7 +579,9 @@ Existing database columns remain timezone-naive for compatibility. UTC timestamp
   append-only attempt ledger, or external queue orchestrator. Work that exceeds
   its configured lease may be computed again, while attempt fencing prevents a
   stale worker from overwriting the authoritative result.
-- Operational metrics, tracing, and production alerting are not yet implemented.
+- Week 9 added correlated prediction logs, private metrics, and local pilot
+  alerts. The staging capacity gate and external alert delivery remain separate
+  operational work. [Pilot monitoring runbook](docs/engineering/monitoring-runbook.md)
 
 ## Week 3 Handoff
 

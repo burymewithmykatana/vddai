@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -15,6 +16,12 @@ class Settings(BaseSettings):
 
     JWT_SECRET_KEY: str = "change-this-secret"
     JWT_EXPIRE_MINUTES: int = 60
+
+    METRICS_ENABLED: bool = False
+    METRICS_BIND_MODE: Literal["loopback", "container"] = "loopback"
+    METRICS_API_PORT: int = Field(default=9108, ge=1024, le=65535)
+    METRICS_WORKER_PORT: int = Field(default=9109, ge=1024, le=65535)
+    METRICS_QUALITY_REFERENCE_FILE: Path | None = None
 
     MAX_IMAGE_SIZE_MB: int = Field(default=5, ge=1)
     MAX_IMAGE_PIXELS: int = Field(

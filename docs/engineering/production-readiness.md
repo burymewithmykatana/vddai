@@ -69,8 +69,8 @@ application image without publishing it. Another mandatory job audits the
 installed pinned Python environment with `pip-audit==2.10.1`; this is a known
 dependency-vulnerability check, not an operating-system image scan, SBOM,
 provenance attestation, signing mechanism, or proof of application security.
-The audit is strict except for the one exact, temporary ECDSA advisory documented
-in ADR 0013; every other finding remains non-green.
+The audit runs in strict mode and every reported finding blocks the quality
+gate. [ADR 0016](../decisions/0016-hs256-jwt-provider-and-strict-audit.md)
 
 The stable aggregate check is `VDDAI v0.1.0 quality gate`. It succeeds only
 when every required job reports `success`; failure, skip, cancellation, timeout,
@@ -158,6 +158,242 @@ digest and artifact snapshot until the replacement is accepted. Do not run old
 and new worker versions together. A downgrade requires the ADR 0010/0011
 preconditions; do not use `docker compose down -v`, which deletes durable
 state, without explicit human authorization.
+
+## W9D1 prediction lifecycle logs
+
+The API and worker emit one JSON object per lifecycle event on standard
+output. Operators can follow a prediction from upload through queueing,
+inference, result persistence, and authorized readback.
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version`, `timestamp`, `level` | Schema version `1`, a UTC timestamp, and log severity. |
+| `service`, `event`, `status` | The API or worker, the lifecycle event, and its outcome or recorded prediction state. |
+| `request_id` | A server-generated ID for each HTTP request. Events on one API request share this ID. Worker events have a null request ID. |
+| `prediction_id`, `job_id`, `attempt` | Once known, both IDs carry the same PostgreSQL prediction ID. Worker attempts use the persisted attempt number. |
+| `model_version` | The serving package ID stored with a result. The selected registry version is reported by `GET /health/model`. |
+| `latency_ms` | Stage duration in milliseconds when available. Successful inference uses the latency recorded with the result. |
+| `method`, `route`, `http_status`, `error_code` | Bounded HTTP metadata, the registered route template, and the stable diagnostic code when available. |
+
+Fields appear as null when they are unavailable. Request headers, bodies,
+raw URLs, image object keys, and exception details stay outside the event
+schema. A denied or missing prediction read records the HTTP `404` with the
+route template and no prediction ID. On either service's normal entry point,
+an application initialization error during import emits
+`service.startup_failed` with `startup_failed` and exits with status `1`.
+
+### Follow one prediction
+
+Locate the upload in the API logs and use its `request_id` to find
+`prediction.enqueue`. Use the resulting `job_id` across the API and worker
+logs. The example uses synthetic identifiers and a fixture package ID.
+
+| Event | What to look for |
+| --- | --- |
+| `storage.write_finished` | Upload request `d25815019f0c47628e2a6a4b2112b671` stored an image. |
+| `prediction.enqueue` | The same request committed job `42` in state `queued`. |
+| `http.request_finished` | The upload request finished with `202` for `POST /predictions`. |
+| `prediction.claim` | The worker committed the claim for job `42`, attempt `1`. |
+| `storage.read_finished` | The worker read the image for job `42`. |
+| `prediction.inference` | Attempt `1` scored with fixture package `mvtec-tile-resnet18-knn-a6378e04c6442353`. |
+| `prediction.terminal_committed` | The worker committed the completed result and package identity. |
+| `prediction.readback` | Authorized request `09bed4bac54149caacc2fda01408f106` retrieved job `42` and its package identity. |
+| `http.request_finished` | The readback request finished with `200` for `GET /predictions/{prediction_id}`. |
+
+Use `attempt` to follow retry and recovery events. A committed retry emits
+`prediction.retry_scheduled` with status `processing`. A fenced completion
+emits `prediction.attempt_discarded`. If a result commit reports an error,
+`prediction.result_observed` records that the worker subsequently read a
+durable terminal result for the same attempt. The corresponding
+`prediction.settlement_failed` records the reported persistence error.
+An upload whose queue commit fails may also produce a
+`storage.orphan_cleanup` event on the upload's request ID.
+
+W9D1 review evidence is available in the
+[independent re-review](../reviews/2026-11-27-w9d1-correlated-logging-r2.md).
+
+## W9D2 service and queue metrics
+
+The API and worker each serve a private Prometheus registry when
+`METRICS_ENABLED=true`. The default is `false`. With
+`METRICS_BIND_MODE=loopback` (the default), the listeners bind to
+`127.0.0.1`. The default ports are `9108` for the API
+(`METRICS_API_PORT`) and `9109` for the worker (`METRICS_WORKER_PORT`).
+An operator on the same host can check an enabled loopback listener with
+`curl http://127.0.0.1:9108/metrics` or
+`curl http://127.0.0.1:9109/metrics`. The application’s public API
+`/metrics` path continues to return `404`.
+
+The `container` bind mode resolves the process hostname and requires one
+IPv4 address in the private `10/8`, `172.16/12`, or `192.168/16` ranges.
+Keep that listener reachable only on the approved internal network. These
+listeners use HTTP and rely on network isolation for access control.
+Listener startup errors produce the safe `service.metrics_unavailable`
+diagnostic. The API or worker can continue running while its metrics are
+unavailable. Treat an unreachable listener as missing telemetry and check the
+service health separately. See
+[ADR 0015](../decisions/0015-private-observability.md) for the boundary.
+
+| Listener | Metric | Interpretation |
+| --- | --- | --- |
+| API | `vddai_api_ready` | The API completed startup. |
+| API | `vddai_http_requests_total`, `vddai_http_request_duration_seconds` | Request counts and duration by bounded method, registered route template, and HTTP status class. Unmatched routes share one label and unfinished responses count as `5xx`. |
+| API | `vddai_database_ready`, `vddai_queue_depth`, `vddai_queue_oldest_age_seconds` | A successful read reports depth and seconds since the oldest acceptance for `queued`, `active`, and `retry_waiting`. Active includes expired claims awaiting recovery. Empty states have zero depth and age. A DB error reports readiness zero and omits queue values. An overlapping snapshot omits the database and queue metrics for that scrape. |
+| Worker | `vddai_worker_ready`, `vddai_worker_model_ready` | Worker readiness reflects the latest recovery and claim poll. Model readiness is unknown (`NaN`) before an observed model initialization failure or successful inference. |
+| Worker | `vddai_job_claims_total`, `vddai_job_retries_scheduled_total`, `vddai_job_terminal_total` | Counts of committed claims, retry schedules, and observed terminal commits. |
+| Worker | `vddai_job_duration_seconds`, `vddai_inference_duration_seconds` | Histograms for acceptance through acknowledged terminal commit and successful inference using its frozen latency boundary. A terminal result found after an ambiguous commit does not create a duration sample or increment the terminal counter. |
+| Worker | `vddai_job_execution_failures_total` | Failed attempts by bounded stage (`model`, `storage`, or `inference`). Use terminal job status to count failed jobs. |
+
+The API collects queue state with one grouped read query. PostgreSQL applies a
+one second statement timeout to this snapshot. Metrics are process local and
+counters reset on restart. Labels and diagnostics exclude user identifiers,
+job identifiers, raw URLs, uploaded image content, and secrets.
+
+Pilot targets are p95 API latency at most **1 second**, p95 latency from job
+acceptance through terminal commit at most **15 seconds**, p95 inference
+latency at most **5 seconds**, and unexpected failures at most **1%**.
+Assess those targets from an explicit workload. The W9D2
+[independent re-review](../reviews/2026-11-27-w9d2-service-metrics-r2.md)
+and `W9D2-QA-2026-11-27-001` verify the signals and their failure behavior.
+
+## W9D3 input and model quality
+
+The private API listener reports committed uploads through
+`vddai_upload_accepted_total` and original width and height through
+`vddai_upload_dimension_pixels`. It counts image validation rejections in
+`vddai_upload_validation_rejected_total` by bounded status. Queue rollback
+leaves the accepted upload count unchanged.
+
+The private worker listener summarizes successful inference attempts in the
+current and previous 59 minute buckets. It records image format, original
+width and height, the mean and standard deviation of normalized RGB pixels,
+anomaly score bins, anomaly rate, and the observed package ID. The observer
+runs after inference measures its latency. A retry can produce another
+observation if it also scores successfully. Only bin counts and sums remain
+in memory. The monitor discards expired buckets and retains no images,
+paths, prediction identifiers, or individual scores.
+
+### Build the reference
+
+Run the offline builder with an explicit frozen package, its training feature
+bank, the matching canonical dataset manifest, and the local dataset root.
+Use the existing local `TORCH_HOME` cache for the frozen ResNet-18 weights.
+
+```powershell
+python -m ml.build_quality_reference `
+  --package-manifest "<package>/run_manifest.json" `
+  --feature-bank "<feature-bank-directory>" `
+  --dataset-manifest "<dataset-manifest.json>" `
+  --dataset-root "<dataset-root>" |
+  Set-Content -Encoding utf8 "<private-directory>/quality-reference.json"
+```
+
+Keep the generated aggregate JSON outside Git. The builder checks the package
+and manifest fingerprint, rejects duplicate sample IDs and canonical image
+paths across splits, and compares decoded format, size, and mode to each
+normal validation record. It reads image bytes only from the matched normal
+validation split. The reference is specific to its package, dataset manifest,
+and preprocessing version. The manifest fingerprints its recorded metadata.
+
+Set `METRICS_QUALITY_REFERENCE_FILE` to the reference path readable by the
+worker when enabling private metrics. Synthetic fixture references are
+accepted only with `ENVIRONMENT=test`. A comparison requires at least 30
+matched reference observations and 30 observations from the current window.
+A missing, invalid, mismatched, or mixed window has
+`vddai_quality_comparison_ready=0` and emits no warning samples. The monitor
+waits for the older model's observation bucket to expire before comparing
+after a switch. `vddai_quality_reference_count` identifies the loaded
+reference source and its count.
+
+### Interpret a shift
+
+| Signal | Warning when comparison is ready |
+| --- | --- |
+| `pixel_mean` | Mean normalized RGB level differs from the reference by at least 0.15. |
+| `pixel_contrast` | Average per-image RGB standard deviation differs by at least 0.10. |
+| `format_mix` | A format's share differs by at least 20 percentage points. |
+| `anomaly_rate` | The anomaly label rate differs by at least 20 percentage points. |
+| `score_p95` | The nearest-rank 95th percentile exceeds 1.5 times the reference p95. |
+
+Use `vddai_quality_shift_warning{signal="..."}` or capture one private
+worker scrape and summarize it locally:
+
+```powershell
+curl.exe --fail --silent http://127.0.0.1:9109/metrics --output "<private-directory>/worker-metrics.txt"
+python -m scripts.report_quality_shift "<private-directory>/worker-metrics.txt"
+```
+
+A report with an available comparison and an empty warning list indicates
+the thresholds were clear. The report uses `warnings: null` when comparison
+is unavailable. These provisional warnings describe aggregate change. Start
+by checking the sample count, package identity, and upload mix. The serving
+classifier and its approved threshold continue to govern predictions.
+
+The local frozen package `mvtec-tile-resnet18-knn-fe64db2228370b2d` produced
+a 46-image matched reference. The controlled validation replay produced no
+warnings, while 30 shifted synthetic JPEG observations triggered all five.
+See the [independent re-review](../reviews/2026-11-27-w9d3-quality-monitoring-r2.md)
+for the reviewed subject and closure evidence.
+
+Independent QA `W9D3-QA-2026-11-27-001` matched the frozen reference
+and verified the private scrape, rollback, and report behavior.
+
+## W9D5 local pilot capacity
+
+The disposable workload uses two authenticated synthetic owners and one
+outstanding client job. It schedules 10 jobs in a five-minute warmup and 60 in
+a fifteen-minute steady phase. The steady rate is four jobs per minute total,
+two per owner. It cycles PNG, JPEG, and WebP at 384 × 288, 640 × 480, and
+1024 × 768 pixels. Each job has a 15-second deadline shared across upload and
+owner readback. The runner requires a distinct queued prediction for every
+accepted upload. [Local runner instructions](../../readme.md#w9d5-local-pilot-soak)
+
+### Measured results
+
+The 28 November 2026 run used one API, one worker, PostgreSQL, Redis, and
+private Prometheus and Grafana in a local Docker environment with 8 vCPUs and
+3.76 GiB of memory. The worker used the frozen package
+`mvtec-tile-resnet18-knn-fe64db2228370b2d`.
+
+| Metric | Observed | Limit |
+| --- | --- | --- |
+| API request p95, 374 samples | 0.110 s | ≤ 1 s |
+| Client submission to observed terminal result p95 | 1.584 s | ≤ 15 s |
+| Persisted inference p95 | 0.175 s | ≤ 5 s |
+| Unexpected failures | 0 of 70 (0%) | ≤ 1% |
+
+The workload lasted 1,200.147 seconds and completed all 70 jobs. PostgreSQL
+confirmed 71 distinct completed rows including one separate preflight
+prediction. All completed in one attempt. The queue drained. At 15-second
+scrapes, the observed maxima were one queued job, one active job, and zero
+waiting retries.
+
+| Service | Peak sampled CPU | Peak sampled memory |
+| --- | --- | --- |
+| API | 69.95% | 542.6 MiB |
+| Worker | 18.94% | 442.1 MiB |
+| PostgreSQL | 29.08% | 44.36 MiB |
+| Redis | 9.26% | 15.25 MiB |
+| Prometheus | 2.41% | 52.48 MiB |
+| Grafana | 17.10% | 552.1 MiB |
+
+Each service had 70 successful resource samples. Individual service peaks can
+occur at different times. The receipt ties the results, application image,
+package, SQL counts, and fixture cleanup to the exact runner. Its SHA-256 is
+`9a45c0acad346a6860f222237e197d1122413a9618ef45f5a3eede1b38afb146`.
+Independent QA `W9D5-QA-2026-11-28-001` verified the receipt and passed 476
+canonical and 172 strict PostgreSQL tests with zero skips. [Independent re-review](../reviews/2026-11-28-w9d5-local-pilot-soak-r2.md)
+
+### Capacity and release gate
+
+The verified local envelope is four steady jobs per minute with one
+outstanding client job on the measured stack and package. End-to-end latency
+was the largest measured delay. It includes API handling, queue wait,
+inference, persistence, and client polling. The available aggregates establish
+the local budget and leave phase-by-phase attribution and saturation open.
+Keep optimization deferred until that profiling is justified by measurements.
+The staging workload remains a separate, human-authorized release gate on an
+immutable candidate.
 
 ## Required commands
 

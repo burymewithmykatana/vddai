@@ -1,0 +1,218 @@
+rule_files:
+  - alerts.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: "up{job=\"vddai-api\",instance=\"api:9108\"}"
+        values: "1 1 1"
+      - series: "up{job=\"vddai-worker\",instance=\"worker:9109\"}"
+        values: "0 0 1"
+      - series: "vddai_api_ready{job=\"vddai-api\",instance=\"api:9108\"}"
+        values: "0 0 1"
+      - series: "vddai_worker_ready{job=\"vddai-worker\",instance=\"worker:9109\"}"
+        values: "0 0 1"
+      - series: "vddai_database_ready{job=\"vddai-api\",instance=\"api:9108\"}"
+        values: "0 0 1"
+      - series: "vddai_worker_model_ready{job=\"vddai-worker\",instance=\"worker:9109\"}"
+        values: "0 0 1"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: VDDAIApiUnavailable
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: VDDAIApiUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: "vddai-api"
+              instance: "api:9108"
+              severity: "critical"
+              owner: "platform"
+            exp_annotations:
+              summary: "API is unavailable or has not completed startup"
+              runbook: "docs/engineering/monitoring-runbook.md#api-unavailable"
+      - eval_time: 2m
+        alertname: VDDAIApiUnavailable
+        exp_alerts: []
+      - eval_time: 0m
+        alertname: VDDAIWorkerUnavailable
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: VDDAIWorkerUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: "vddai-worker"
+              instance: "worker:9109"
+              severity: "critical"
+              owner: "platform"
+            exp_annotations:
+              summary: "Worker is unavailable or cannot poll the queue"
+              runbook: "docs/engineering/monitoring-runbook.md#worker-unavailable"
+      - eval_time: 2m
+        alertname: VDDAIWorkerUnavailable
+        exp_alerts: []
+      - eval_time: 0m
+        alertname: VDDAIDatabaseUnavailable
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: VDDAIDatabaseUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: "vddai-api"
+              instance: "api:9108"
+              severity: "critical"
+              owner: "platform"
+            exp_annotations:
+              summary: "API cannot collect a PostgreSQL queue snapshot"
+              runbook: "docs/engineering/monitoring-runbook.md#database-unavailable"
+      - eval_time: 2m
+        alertname: VDDAIDatabaseUnavailable
+        exp_alerts: []
+      - eval_time: 0m
+        alertname: VDDAIModelUnavailable
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: VDDAIModelUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: "vddai-worker"
+              instance: "worker:9109"
+              severity: "critical"
+              owner: "ml"
+            exp_annotations:
+              summary: "Worker observed that the serving package is unavailable"
+              runbook: "docs/engineering/monitoring-runbook.md#model-unavailable"
+      - eval_time: 2m
+        alertname: VDDAIModelUnavailable
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: "vddai_http_requests_total{job=\"vddai-api\",instance=\"api:9108\",status_class=\"2xx\"}"
+        values: "0+95x15"
+      - series: "vddai_http_requests_total{job=\"vddai-api\",instance=\"api:9108\",status_class=\"5xx\"}"
+        values: "0+5x15"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: VDDAIApiErrors
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: VDDAIApiErrors
+        exp_alerts:
+          - exp_labels:
+              severity: "warning"
+              owner: "platform"
+            exp_annotations:
+              summary: "API 5xx fraction is at least 2% with sufficient request volume"
+              runbook: "docs/engineering/monitoring-runbook.md#sustained-api-errors"
+  - interval: 1m
+    input_series:
+      - series: "vddai_http_requests_total{job=\"vddai-api\",instance=\"api:9108\",status_class=\"5xx\"}"
+        values: "0+1x15"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: VDDAIApiErrors
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: "vddai_queue_oldest_age_seconds{job=\"vddai-api\",instance=\"api:9108\",state=\"queued\"}"
+        values: "31+0x7 30+0x5"
+      - series: "vddai_queue_oldest_age_seconds{job=\"vddai-api\",instance=\"api:9108\",state=\"retry_waiting\"}"
+        values: "30+0x15"
+      - series: "vddai_job_terminal_total{job=\"vddai-worker\",instance=\"worker:9109\",status=\"failed\"}"
+        values: "0+1x15"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: VDDAIQueueBacklog
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: VDDAIQueueBacklog
+        exp_alerts:
+          - exp_labels:
+              job: "vddai-api"
+              instance: "api:9108"
+              state: "queued"
+              severity: "warning"
+              owner: "platform"
+            exp_annotations:
+              summary: "An outstanding queued or retrying job is older than 30 seconds"
+              runbook: "docs/engineering/monitoring-runbook.md#queue-backlog"
+      - eval_time: 9m
+        alertname: VDDAIQueueBacklog
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: VDDAITerminalFailures
+        exp_alerts:
+          - exp_labels:
+              severity: "warning"
+              owner: "platform"
+            exp_annotations:
+              summary: "At least three jobs reached terminal failure in ten minutes"
+              runbook: "docs/engineering/monitoring-runbook.md#failed-inference"
+  - interval: 1m
+    input_series:
+      - series: "vddai_inference_duration_seconds_bucket{job=\"vddai-worker\",instance=\"worker:9109\",le=\"5\"}"
+        values: "0+0x15"
+      - series: "vddai_inference_duration_seconds_bucket{job=\"vddai-worker\",instance=\"worker:9109\",le=\"10\"}"
+        values: "0+100x15"
+      - series: "vddai_inference_duration_seconds_bucket{job=\"vddai-worker\",instance=\"worker:9109\",le=\"+Inf\"}"
+        values: "0+100x15"
+      - series: "vddai_inference_duration_seconds_count{job=\"vddai-worker\",instance=\"worker:9109\"}"
+        values: "0+100x15"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: VDDAIInferenceSlow
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: VDDAIInferenceSlow
+        exp_alerts:
+          - exp_labels:
+              severity: "warning"
+              owner: "ml"
+            exp_annotations:
+              summary: "Inference p95 is over five seconds with sufficient observations"
+              runbook: "docs/engineering/monitoring-runbook.md#inference-latency"
+  - interval: 1m
+    input_series:
+      - series: "vddai_quality_comparison_ready{job=\"vddai-worker\",instance=\"worker:9109\"}"
+        values: "0 1+0x7 0+0x3"
+      - series: "vddai_quality_shift_warning{job=\"vddai-worker\",instance=\"worker:9109\",signal=\"format_mix\"}"
+        values: "1+0x12"
+      - series: "vddai_quality_shift_warning{job=\"vddai-worker\",instance=\"worker:9109\",signal=\"score_p95\"}"
+        values: "1+0x12"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: VDDAIInputQualityShift
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: VDDAIInputQualityShift
+        exp_alerts:
+          - exp_labels:
+              job: "vddai-worker"
+              instance: "worker:9109"
+              signal: "format_mix"
+              severity: "warning"
+              owner: "ml"
+            exp_annotations:
+              summary: "An input quality signal crossed its matched reference threshold"
+              runbook: "docs/engineering/monitoring-runbook.md#input-quality-shift"
+      - eval_time: 10m
+        alertname: VDDAIInputQualityShift
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: VDDAIModelQualityShift
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: VDDAIModelQualityShift
+        exp_alerts:
+          - exp_labels:
+              job: "vddai-worker"
+              instance: "worker:9109"
+              signal: "score_p95"
+              severity: "warning"
+              owner: "ml"
+            exp_annotations:
+              summary: "A model output signal crossed its matched reference threshold"
+              runbook: "docs/engineering/monitoring-runbook.md#model-quality-shift"
+      - eval_time: 10m
+        alertname: VDDAIModelQualityShift
+        exp_alerts: []
