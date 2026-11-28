@@ -338,6 +338,63 @@ for the reviewed subject and closure evidence.
 Independent QA `W9D3-QA-2026-11-27-001` matched the frozen reference
 and verified the private scrape, rollback, and report behavior.
 
+## W9D5 local pilot capacity
+
+The disposable workload uses two authenticated synthetic owners and one
+outstanding client job. It schedules 10 jobs in a five-minute warmup and 60 in
+a fifteen-minute steady phase. The steady rate is four jobs per minute total,
+two per owner. It cycles PNG, JPEG, and WebP at 384 × 288, 640 × 480, and
+1024 × 768 pixels. Each job has a 15-second deadline shared across upload and
+owner readback. The runner requires a distinct queued prediction for every
+accepted upload. [Local runner instructions](../../readme.md#w9d5-local-pilot-soak)
+
+### Measured results
+
+The 28 November 2026 run used one API, one worker, PostgreSQL, Redis, and
+private Prometheus and Grafana in a local Docker environment with 8 vCPUs and
+3.76 GiB of memory. The worker used the frozen package
+`mvtec-tile-resnet18-knn-fe64db2228370b2d`.
+
+| Metric | Observed | Limit |
+| --- | --- | --- |
+| API request p95, 374 samples | 0.110 s | ≤ 1 s |
+| Client submission to observed terminal result p95 | 1.584 s | ≤ 15 s |
+| Persisted inference p95 | 0.175 s | ≤ 5 s |
+| Unexpected failures | 0 of 70 (0%) | ≤ 1% |
+
+The workload lasted 1,200.147 seconds and completed all 70 jobs. PostgreSQL
+confirmed 71 distinct completed rows including one separate preflight
+prediction. All completed in one attempt. The queue drained. At 15-second
+scrapes, the observed maxima were one queued job, one active job, and zero
+waiting retries.
+
+| Service | Peak sampled CPU | Peak sampled memory |
+| --- | --- | --- |
+| API | 69.95% | 542.6 MiB |
+| Worker | 18.94% | 442.1 MiB |
+| PostgreSQL | 29.08% | 44.36 MiB |
+| Redis | 9.26% | 15.25 MiB |
+| Prometheus | 2.41% | 52.48 MiB |
+| Grafana | 17.10% | 552.1 MiB |
+
+Each service had 70 successful resource samples. Individual service peaks can
+occur at different times. The receipt ties the results, application image,
+package, SQL counts, and fixture cleanup to the exact runner. Its SHA-256 is
+`9a45c0acad346a6860f222237e197d1122413a9618ef45f5a3eede1b38afb146`.
+Independent QA `W9D5-QA-2026-11-28-001` verified the receipt and passed 476
+canonical and 172 strict PostgreSQL tests with zero skips. [Independent re-review](../reviews/2026-11-28-w9d5-local-pilot-soak-r2.md)
+
+### Capacity and release gate
+
+The verified local envelope is four steady jobs per minute with one
+outstanding client job on the measured stack and package. End-to-end latency
+was the largest measured delay. It includes API handling, queue wait,
+inference, persistence, and client polling. The available aggregates establish
+the local budget and leave phase-by-phase attribution and saturation open.
+Keep optimization deferred until that profiling is justified by measurements.
+The staging workload remains a separate, human-authorized release gate on an
+immutable candidate.
+
 ## Required commands
 
 From the repository root:
