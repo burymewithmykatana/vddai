@@ -17,7 +17,14 @@ one explicitly configured, frozen model package and persists its score,
 threshold, decision, latency, package ID, and full public-safe lineage. Week 6
 adds experiment tracking, a model registry, and controlled model promotion.
 
-For Week 6 changes:
+The Week 9 implementation is merged: security and reliability guardrails,
+immutable image and single-host staging tooling, correlated logs, private
+metrics, aggregate quality monitoring, local dashboards/alerts, and a
+verified local pilot workload. Live staging smoke, rollback and immutable
+staging capacity remain separate release conditions. See the maintained
+`docs/engineering/production-readiness.md` for current evidence and risks.
+
+For changes to experiment tracking, registry or serving selection:
 
 - keep experiment recording, candidate registration, promotion, and serving
   resolution explicit and independently testable;
@@ -56,6 +63,8 @@ Infrastructure:
 - Alembic migrations;
 - pytest;
 - pinned Python dependencies in `requirements.txt`;
+- hosted CI quality gate, digest-selected images and single-host Caddy staging;
+- private Prometheus metrics and local Grafana monitoring;
 - generated datasets, evaluation outputs, feature banks, thresholds, and model
   weights kept outside Git through repository ignore rules.
 
