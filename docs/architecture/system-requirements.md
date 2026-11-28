@@ -1,7 +1,7 @@
 # VDDAI System Requirements
 
 - Status: Current
-- Last reviewed: 2026-08-21
+- Last reviewed: 2026-11-28 (Week 9 documentation baseline)
 - Scope: v0.1 visual-inspection feasibility-pilot platform
 
 ## Product Boundary
@@ -114,6 +114,17 @@ public benchmark results.
   and internal-only PostgreSQL and Redis. Require digest-selected API, worker,
   dependency, and provisioned model-artifact identities; keep staging secrets
   outside Git and retain the current shared local-storage boundary.
+- Emit correlated, public-safe JSON lifecycle diagnostics without request
+  bodies, raw URLs, secrets or private image paths.
+- Expose opt-in API and worker metrics only through private listeners; keep
+  the public API metrics route unavailable. Keep metric labels bounded and
+  avoid user/job identifiers and image content.
+- Compare aggregate input and model signals with a matched normal-validation
+  reference; report unavailable comparisons explicitly and never adjust the
+  frozen serving threshold from monitoring observations.
+- Provide local dashboards, alert rules and operator procedures, and verify
+  a bounded disposable workload. Treat live staging smoke, rollback and
+  immutable staging capacity as distinct release evidence.
 
 ## Deferred Capabilities
 
@@ -128,6 +139,10 @@ safety/regulatory certification.
 - [`../decisions/README.md`](../decisions/README.md)
 - [`../decisions/0010-database-backed-prediction-reliability.md`](../decisions/0010-database-backed-prediction-reliability.md)
 - [`../decisions/0011-database-backed-prediction-admission.md`](../decisions/0011-database-backed-prediction-admission.md)
+- [`../decisions/0015-private-observability.md`](../decisions/0015-private-observability.md)
+- [`../decisions/0016-hs256-jwt-provider-and-strict-audit.md`](../decisions/0016-hs256-jwt-provider-and-strict-audit.md)
+- [`../engineering/production-readiness.md`](../engineering/production-readiness.md)
+- [`../engineering/monitoring-runbook.md`](../engineering/monitoring-runbook.md)
 - [`../engineering/data-lineage.md`](../engineering/data-lineage.md)
 - [`../product/product-definition.md`](../product/product-definition.md)
 - [`../../AGENTS.md`](../../AGENTS.md)

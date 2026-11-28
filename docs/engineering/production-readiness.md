@@ -2,7 +2,8 @@
 
 - Status: Current
 - Scope: v0.1.0 MVTec AD `tile` pilot
-- Gate: W7D4 production security and reliability
+- Gate: W7D4 production security and reliability, W8 delivery, W9 local observability and capacity
+- Baseline: Week 9 merged on 2026-11-28 (PR #23); live staging release remains unverified
 
 ## Purpose
 
@@ -15,6 +16,12 @@ Run the gate only against a disposable local or test environment. The deployed
 probe creates users, prediction history, and a stored image. It accepts only an
 API whose `/health` response identifies the environment as `development` or
 `test`; every other identity fails before the first mutating request.
+
+## Week 9 baseline and release boundary
+
+[PR #23](https://github.com/burymewithmykatana/vddai/pull/23) merged the local observability and capacity implementation plus the dependency audit remediation. The recorded W9D5 independent QA result is 476 canonical tests and 172 strict PostgreSQL tests with zero skips. The later [dependency remediation review](../reviews/2026-11-28-pr23-dependency-audit.md) records 484 canonical and 172 strict tests with zero skips from Coder evidence, plus 81 independently reviewed focused tests. It also records a successful strict Windows audit and an image build, but a supplemental in-image audit could not resolve the CPU Torch wheel. These are separate, point-in-time results; do not infer exact-image audit coverage.
+
+The [merged revision's hosted workflow](https://github.com/burymewithmykatana/vddai/actions/runs/46164355971) is the source for CI and GHCR publication status. Historical W8D4 live HTTPS smoke and isolated application rollback evidence are recorded below; current-candidate staging verification, immutable staging capacity, operator-approved retention and remaining risk closure still require their own evidence and human approval. Local monitoring has no external notification receiver.
 
 ## Gate outcome
 
@@ -148,10 +155,10 @@ The artifacts directory is mounted read-only and must contain the selected
 registry, package, feature bank, and ResNet checkpoint. Confirm the expected
 identity through `GET /health/model`; it exposes only the selected model
 version and package ID. `GET /health` and `GET /health/db` provide the other
-safe readiness interfaces. The W8D4 section below records live HTTPS smoke on the earlier staging revision
-and an isolated two-digest application rollback rehearsal. Repeat smoke and
-rollback verification for the next approved immutable candidate as required;
-never run a data-creating probe without explicit operator approval.
+safe readiness interfaces. W8D4 records live HTTPS smoke on an earlier staging
+revision and an isolated two-digest application rollback rehearsal. The
+current Week 9 immutable candidate still needs its own applicable release
+evidence. Do not run a data-creating probe without explicit operator approval.
 
 Before a deploy that can migrate schema, stop the worker and take recoverable
 backups of PostgreSQL, uploads, and the artifact snapshot. Keep the old image
@@ -649,7 +656,7 @@ without explicit human authorization because it deletes local Docker volumes.
 | `W7-R05` | Registry, feature-bank, threshold, and ResNet-18 weight files are provisioned runtime dependencies outside Git. | ML / Platform | Release blocker | The exact promoted selection and all checksummed artifacts must be present, and the deployed proof must pass without download or fallback. Promotion remains human-approved. |
 | `W7-R06` | Downgrade removes retry/lease and admission state introduced by W7D2/W7D3. | Platform / Database | Release blocker for rollback | Stop all workers, confirm no processing row depends on recovery metadata, back up the target, and obtain human rollback approval. The gate exercises downgrade only in its isolated schema. |
 | `W7-R07` | The deployed probe creates two users, a prediction row, and an input object and intentionally does not perform record-coupled cleanup. | QA / Platform | Operational | Run only against a disposable environment identified by `/health` as `development` or `test`, and record its target identity. Every other identity fails closed before data creation. |
-| `W7-R08` | Automated alerting and production dashboards are scheduled after Week 7. | Platform | Conditional release blocker | Do not operate an unattended pilot until the later monitoring gate supplies alerts, dashboards, and an operator runbook. A supervised local pilot must record this limitation. |
+| `W7-R08` | Week 9 provides local dashboard, alert rules and an operator runbook; the local overlay has no external notification receiver. | Platform | Conditional release blocker | Supervised local monitoring is implemented. Before unattended staging/pilot operation, verify monitoring on the approved environment and external alert delivery or an explicitly approved operator response arrangement. |
 
 ## Evidence record
 

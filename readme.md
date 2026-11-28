@@ -4,12 +4,7 @@ Production-oriented backend for authenticated, asynchronous visual anomaly
 detection. VDDAI is designed as a reusable pilot platform rather than a
 detector tied to one product category.
 
-> **Status:** Registry-selected production inference, W7D2 prediction
-> reliability, W7D3 admission guardrails, and the W7D4 production security and
-> reliability gate are implemented for v0.1.0. Authenticated prediction jobs
-> use bounded admission, retries, leases, stale-work recovery, and fenced
-> terminal persistence while preserving the frozen MVTec AD `tile` inference
-> and public API contracts.
+> **Status (28 November 2026):** Week 9 implementation merged in [PR #23](https://github.com/burymewithmykatana/vddai/pull/23). The v0.1.0 MVTec AD `tile` pilot has authenticated asynchronous inference, controlled model selection, bounded job admission and recovery, immutable image and single-host staging tooling, and private observability with a verified disposable local workload. **This is a local engineering baseline, not a released or customer-validated pilot.** Earlier W8D4 live staging smoke and isolated application rollback evidence are documented in the [staging runbook](docs/engineering/production-readiness.md#w8d4-staging-smoke-and-supervised-rollback); current-candidate staging verification, immutable staging capacity and remaining release conditions are not established by the local Week 9 evidence.
 
 ## Start Here
 
@@ -22,6 +17,8 @@ detector tied to one product category.
 | Understand prediction retries and recovery | [Prediction reliability and recovery](#prediction-reliability-and-recovery) and [ADR 0010](docs/decisions/0010-database-backed-prediction-reliability.md) |
 | Prove the complete inference flow | [W6D1 inference gate](#w6d1-reproducible-real-inference-gate) |
 | Run the production security and reliability gate | [W7D4 production gate](#w7d4-production-security-and-reliability-gate) and [risk register](docs/engineering/production-readiness.md) |
+| Start local observability | [Monitoring runbook](docs/engineering/monitoring-runbook.md) |
+| Prepare single-host staging | [Staging runtime](#w8d3-staging-runtime) |
 | Run the disposable pilot workload | [W9D5 local pilot soak](#w9d5-local-pilot-soak) |
 | Track and query the Week 4 baseline | [Week 6 experiment tracking](#week-6-experiment-tracking) |
 | Reproduce the data and model baseline | [MVTec AD dataset](#mvtec-ad-tile-dataset) and [Week 4 baseline](#week-4-complete) |
@@ -51,7 +48,22 @@ the host, change the database and Redis hosts to `localhost` as described in
 | Data contract | Validated MVTec AD `tile` ingestion, deterministic splits and fingerprints, mask handling, and shared offline/online preprocessing |
 | Model baseline | Frozen ResNet-18 features, exact Euclidean nearest-neighbor scoring, and a validation-only frozen threshold |
 | Production inference | Fail-closed package loading, checksum and lineage validation, worker-side inference, bounded retries, lease recovery, fenced lifecycle persistence, and safe failures |
-| Verification | Canonical gate with the complete regression suite, including 7 explicit PostgreSQL 16 concurrency and migration tests; the W7D4 production marker selects 171 cross-boundary tests |
+| Experiments and model registry | Queryable experiment lineage, controlled registration and human-approved promotion, explicit serving selection |
+| Delivery | Hosted quality gate, immutable API/worker image publication, digest-pinned staging runner and Caddy HTTPS configuration |
+| Observability | Correlated JSON lifecycle logs, private Prometheus metrics, aggregate quality-shift warnings, local Grafana dashboard and alert rules |
+| Verification | Week 9 local soak: 476 canonical tests and 172 strict PostgreSQL tests, zero skips; subsequent PR #23 audit remediation: 484 canonical and 172 strict tests, zero skips (recorded Coder evidence) |
+
+## Week 9 Baseline and Evidence
+
+| Evidence | Recorded result |
+|---|---|
+| W9D1–D4 | Correlated logs, private service/queue metrics, aggregate input/model quality monitoring, local dashboard, alerts and runbook |
+| W9D5 workload (28 November 2026) | 70/70 jobs completed in 20 minutes; zero unexpected failures; four steady jobs/minute with one outstanding client job |
+| Measured p95 latencies | API 0.110 s; client submission to observed terminal result 1.584 s; persisted inference 0.175 s |
+| Local workload test evidence | Independent QA: 476 canonical tests and 172 strict PostgreSQL tests, zero skips |
+| Dependency audit remediation | PyJWT replaces python-jose; HS256 interoperability retained; strict audit without exceptions. Recorded Coder evidence: 484 canonical tests and 172 strict PostgreSQL tests, zero skips; independent focused review: 81 passed |
+
+See [capacity evidence and release conditions](docs/engineering/production-readiness.md#w9d5-local-pilot-capacity), [W9D5 independent re-review](docs/reviews/2026-11-28-w9d5-local-pilot-soak-r2.md), and [dependency remediation review](docs/reviews/2026-11-28-pr23-dependency-audit.md). These are distinct evidence sets; the soak is not a saturation benchmark and was not an immutable staging run. Check the [merged revision's hosted workflow](https://github.com/burymewithmykatana/vddai/actions/runs/46164355971) for its current CI and publication outcome; merge alone is not proof of either.
 
 ## Project Goal
 
@@ -77,6 +89,10 @@ The platform remains domain-agnostic so it can be adapted to printing, ceramics,
 - Pillow
 - NumPy
 - scikit-learn
+- PyTorch and torchvision (CPU runtime image)
+- PyJWT (HS256 bearer tokens)
+- Prometheus and Grafana (private local monitoring)
+- Caddy (staging HTTPS ingress)
 - Docker Compose
 - pytest
 
@@ -90,10 +106,12 @@ app/
 ├── models/              # SQLAlchemy persistence models
 ├── schemas/             # Request and response schemas
 ├── services/            # Model, storage, and preprocessing services
+├── workers/             # Database-backed asynchronous prediction worker
 ├── tests/               # API and service tests
 └── main.py              # FastAPI application entry point
 
 ml/                      # Training and ML pipeline code
+deploy/                  # Staging and private local monitoring configuration
 docs/                    # Indexed product, architecture, engineering, ADR, review, and archive docs
 scripts/                 # Bootstrap, verification, documentation, and operational utilities
 artifacts/               # Generated model artifacts and metrics
@@ -579,9 +597,14 @@ Existing database columns remain timezone-naive for compatibility. UTC timestamp
   append-only attempt ledger, or external queue orchestrator. Work that exceeds
   its configured lease may be computed again, while attempt fencing prevents a
   stale worker from overwriting the authoritative result.
-- Week 9 added correlated prediction logs, private metrics, and local pilot
-  alerts. The staging capacity gate and external alert delivery remain separate
-  operational work. [Pilot monitoring runbook](docs/engineering/monitoring-runbook.md)
+- Week 9 local observability is implemented, but external alert delivery and
+  unattended staging operation are not verified. [Pilot monitoring runbook](docs/engineering/monitoring-runbook.md)
+- Earlier staging smoke and isolated rollback were verified under W8D4.
+  Current-candidate staging verification, immutable staging capacity, and
+  approved customer-image retention and deletion procedures remain release conditions. See the [risk register](docs/engineering/production-readiness.md#risk-register).
+- The strict standard pinned Python audit is not an audit of the exact runtime
+  image. The supplemental in-image audit could not resolve the CPU Torch
+  build; see the [PR #23 dependency review](docs/reviews/2026-11-28-pr23-dependency-audit.md).
 
 ## Week 3 Handoff
 
@@ -1199,17 +1222,21 @@ See
 
 ## Roadmap
 
-The 11-week project moves through:
+The merged Week 9 engineering baseline is the starting point for the next
+planning cycle. The historical week labels in this README identify delivered
+work and its evidence, not future deadlines.
 
-1. foundation and product definition;
-2. real image-data engineering;
-3. anomaly-detection baselines;
-4. production inference;
-5. experiment tracking and model registry;
-6. human review and feedback;
-7. testing, CI/CD, and observability;
-8. deployment and pilot packaging;
-9. portfolio case study and customer applications.
+Already implemented: product and data foundations, reproducible anomaly
+baseline, authenticated production inference, experiment and registry tooling,
+security and reliability gates, immutable image and staging configuration,
+and local observability and capacity verification.
+
+Open release conditions and deferred capabilities are recorded in
+[production readiness](docs/engineering/production-readiness.md) and
+[system requirements](docs/architecture/system-requirements.md). Human review
+and feedback, live deployment/pilot validation, and customer-facing packaging
+remain objectives rather than completed capabilities. Future version scope,
+priorities, task acceptance criteria and sequencing are not assigned here.
 
 ## License
 
