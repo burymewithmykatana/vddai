@@ -21,7 +21,7 @@ API whose `/health` response identifies the environment as `development` or
 
 [PR #23](https://github.com/burymewithmykatana/vddai/pull/23) merged the local observability and capacity implementation plus the dependency audit remediation. The recorded W9D5 independent QA result is 476 canonical tests and 172 strict PostgreSQL tests with zero skips. The later [dependency remediation review](../reviews/2026-11-28-pr23-dependency-audit.md) records 484 canonical and 172 strict tests with zero skips from Coder evidence, plus 81 independently reviewed focused tests. It also records a successful strict Windows audit and an image build, but a supplemental in-image audit could not resolve the CPU Torch wheel. These are separate, point-in-time results; do not infer exact-image audit coverage.
 
-The [merged revision's hosted workflow](https://github.com/burymewithmykatana/vddai/actions/runs/46164355971) is the source for CI and GHCR publication status. Live staging authenticated smoke/rollback, immutable staging capacity, operator-approved retention and remaining risk closure still require their own evidence and human approval. Local monitoring has no external notification receiver.
+The [merged revision's hosted workflow](https://github.com/burymewithmykatana/vddai/actions/runs/46164355971) is the source for CI and GHCR publication status. Historical W8D4 live HTTPS smoke and isolated application rollback evidence are recorded below; current-candidate staging verification, immutable staging capacity, operator-approved retention and remaining risk closure still require their own evidence and human approval. Local monitoring has no external notification receiver.
 
 ## Gate outcome
 
@@ -155,9 +155,10 @@ The artifacts directory is mounted read-only and must contain the selected
 registry, package, feature bank, and ResNet checkpoint. Confirm the expected
 identity through `GET /health/model`; it exposes only the selected model
 version and package ID. `GET /health` and `GET /health/db` provide the other
-safe readiness interfaces. Live authenticated staging smoke testing and rollback execution remain
-unverified (original W8D4 scope). Do not run a data-creating probe against
-staging until that work is explicitly approved.
+safe readiness interfaces. W8D4 records live HTTPS smoke on an earlier staging
+revision and an isolated two-digest application rollback rehearsal. The
+current Week 9 immutable candidate still needs its own applicable release
+evidence. Do not run a data-creating probe without explicit operator approval.
 
 Before a deploy that can migrate schema, stop the worker and take recoverable
 backups of PostgreSQL, uploads, and the artifact snapshot. Keep the old image
@@ -165,6 +166,222 @@ digest and artifact snapshot until the replacement is accepted. Do not run old
 and new worker versions together. A downgrade requires the ADR 0010/0011
 preconditions; do not use `docker compose down -v`, which deletes durable
 state, without explicit human authorization.
+
+## W8D4 staging smoke and supervised rollback
+
+Use the [staging smoke client](../../scripts/smoke_staging.py) after an operator
+approves the HTTPS target and one synthetic prediction. The W7 inference probe
+has a separate disposable development and test contract.
+
+### Run the staging smoke
+
+Provision two distinct active non-admin accounts reserved for this gate.
+Verify their user IDs and empty prediction histories. Store the exact HTTPS
+`origin` and separate `owner` and `other` objects in a permission-restricted JSON
+file outside Git. Each object has an integer `id`, `email`, `password`, and
+`is_admin: false`. Use a fixed protected state directory outside Git for that
+account pair and origin.
+
+Use the approved HTTPS FQDN on the default port with normal certificate and
+hostname verification. The client rejects redirects and connects directly.
+The CLI options below take precedence over `VDDAI_STAGING_BASE_URL`,
+`VDDAI_STAGING_FQDN`, `VDDAI_EXPECTED_MODEL_VERSION`, and
+`VDDAI_EXPECTED_PACKAGE_ID`.
+
+```powershell
+python scripts/smoke_staging.py `
+  --base-url "https://<approved-staging-fqdn>" `
+  --expected-fqdn "<approved-staging-fqdn>" `
+  --expected-model-version "<approved-registry-model-version>" `
+  --expected-package-id "<approved-package-id>" `
+  --timeout-seconds 120 `
+  --allow-staging-test-data `
+  --accounts-file "<absolute-protected-accounts-json>" `
+  --state-dir "<absolute-fixed-protected-state-directory>" `
+  --evidence-file "<absolute-new-file-outside-repository>"
+```
+
+Create the evidence parent directory before starting and use a fresh evidence
+filename. The client checks service, database, and exact model identity before
+login. It verifies an unauthenticated `401`, binds both logins to the expected
+subjects, and requires empty histories. It submits one synthetic PNG and
+requires `202` with a queued prediction ID. The second account receives the
+same safe `404` for the owner's known prediction and an absent prediction.
+
+The owner polls for real worker completion. The result carries the expected
+package, full public-safe lineage, latency, score, threshold, and decision.
+Scores strictly above the threshold are anomalous. Equality is normal. The
+client verifies the same typed result in a fresh owner read and owner history,
+then rechecks health and selection. Queue evidence combines API acceptance
+and persisted readback with the PostgreSQL deployment record.
+[Reviewed client contract](../reviews/2026-11-21-w8d4-staging-smoke-r4.md).
+
+### Failure reporting and retention
+
+Exit zero requires all smoke stages and a saved receipt. The supervised
+deadline includes child startup, network requests, and polling. On failure,
+preserve the receipt and its safe stage and error code, model identity, run
+ID, known prediction ID, and cleanup status. Treat a timed-out upload as
+potentially committed and reconcile it before attempting another upload.
+Recovery decisions remain with the operator.
+
+The runner reserves `w8d4-pending` under the fixed state directory before
+upload. `run.json` binds the run, origin, model identities, and two accounts.
+`prediction.json` records the ID once known. An unresolved reservation blocks
+a new upload. Reuse the same accounts and state directory after reconciliation.
+
+Reconcile each run within one business day after terminal settlement. Match
+the protected run to the exact accounts, prediction, and object through
+operator-only records. If the ID is missing, resolve the ambiguous upload
+against PostgreSQL and storage before clearing the reservation. Preserve
+redacted readback and cleanup evidence first. With explicit approval for
+staging data deletion, remove the confirmed terminal test row, then remove
+the now unreferenced object through the validated storage boundary. Keep the
+reservation while work is queued, processing, ambiguous, or awaiting
+disposal. Record partial cleanup and retry by exact identity. Clear the
+reservation after confirmed disposal or proof that the upload created no data.
+[Durable image storage](../decisions/0009-durable-image-storage-boundary.md).
+
+### Release record and backups
+
+The 2026-11-26 isolated rehearsal established these immutable application
+identities. Confirm current authorization and actual deployment identities
+before applying them to a later recovery.
+
+| Role in the rehearsal | Published application image | Source revision |
+| --- | --- | --- |
+| Current and roll-forward | `ghcr.io/burymewithmykatana/vddai@sha256:488b3f7fe19cb91461357e25e24b0cbadb877814568a33cf71aadebabbe67ae5` | `1b9f6160883361bdb99298b256815197ccab8eba` |
+| Previous and rollback | `ghcr.io/burymewithmykatana/vddai@sha256:7becd911afdb0bbcd0dc5c2f8b7f261bea151a7a636dd338f25415ce21a503a8` | `8113c89897c4bc446551f0ec7adf204bae3b8c38` |
+
+The rehearsal restored PostgreSQL 16.16 at Alembic revision `20260821_04`.
+Both images started against that revision. The registry selected
+`mvtec-tile-resnet18-knn-fe64db2228370b2d-dadb8ca7c9b0`. Predictions persisted
+package ID `mvtec-tile-resnet18-knn-fe64db2228370b2d`.
+[R6 image, database, and artifact evidence](../reviews/2026-11-26-w8d4-staging-smoke-r6.md).
+
+Record the target, approval, application and dependency digests, source
+revisions, Alembic revision, model version and package ID, and backup
+checksums in the protected release record. Verify the image of each running
+API and worker by exact container ID.
+
+```powershell
+python scripts/run_staging_compose.py ps -q api worker
+docker inspect --format '{{.Name}} {{.Config.Image}} {{.Image}}' <container-id>
+```
+
+Drain accepted work during the maintenance window, confirm queue counts in
+PostgreSQL, and stop workers before the API. Preserve the database, uploads,
+and complete matching artifact snapshot with the SQLite registry, package
+manifest, feature bank, and cached checkpoint. Record checksums and verify the
+logical dump catalog and isolated restoration. Take physical volume archives
+with PostgreSQL stopped and use a compatible recovery image. Keep an off-host
+copy under the operator's backup policy.
+
+The 2026-08-31 Docker Desktop archive documents a local PostgreSQL 16.15
+restore from `desktop-linux`. The later server rehearsal verified the database
+dump, linked uploaded file, and artifact archive by checksum and restored
+them to isolated storage. The records establish same-host backup and restore.
+Exact original capture ordering and off-host retention remain unverified.
+[R6 backup provenance](../reviews/2026-11-26-w8d4-staging-smoke-r6.md).
+
+### Application rollback and roll-forward
+
+1. Confirm an approved maintenance window, preserved backups, baseline smoke,
+   and a completed result reserved for owner readback. Record the exact API
+   and worker images. Suspend new ingress while keeping an operator validation
+   route available.
+2. Confirm that the previous image recognizes the database revision and that
+   the revision matches the image's Alembic head. The rehearsal ran
+   `alembic current --check-heads` before the normal `alembic upgrade head`
+   at API startup. Stop the image transition if compatibility is unresolved.
+   A schema downgrade or restoration onto live data requires its own approval
+   and the retry, lease, and admission preconditions.
+   [Worker reliability ADR](../decisions/0010-database-backed-prediction-reliability.md).
+   [Admission ADR](../decisions/0011-database-backed-prediction-admission.md).
+3. For an isolated rehearsal, stop the current worker and submit a fresh
+   synthetic image through the isolated API. Verify the accepted ID stays
+   queued with zero attempts and confirm that no processing jobs remain.
+   Preserve the queued job and upload across the switch.
+4. For authorized staging recovery, select the exact previous digest in
+   `VDDAI_APPLICATION_IMAGE` and validate the Compose config. Stop workers
+   before the API, preserve the volumes and registry, and start the
+   replacement API first.
+
+   ```powershell
+   python scripts/run_staging_compose.py config --quiet
+   python scripts/run_staging_compose.py stop worker
+   python scripts/run_staging_compose.py stop api
+   python scripts/run_staging_compose.py up -d --no-deps api
+   ```
+
+   Check the API image, schema, and health endpoints. Start the matching
+   worker after those checks succeed.
+
+   ```powershell
+   python scripts/run_staging_compose.py up -d --no-deps worker
+   python scripts/run_staging_compose.py ps -q api worker
+   ```
+5. Verify both running images, model identity, and recovery of accepted
+   queued work where present. Read the retained completed result as its
+   original owner. Run the separately authorized staging smoke with its
+   dedicated, reconciled accounts. Retain the phase and validation records.
+   Reopen ingress after successful validation.
+6. Roll forward with the exact recorded current digest. Repeat the drain,
+   compatibility check, worker-first shutdown, and API-first startup.
+   Verify both images, retained results, fresh inference, and service,
+   database, and model health. Record the outcome and cleanup evidence.
+
+In the tested isolated run, current-image prediction `2` remained readable
+with the same result. The previous worker completed queued prediction `3` and
+fresh prediction `4`. After roll-forward, reads of all three matched and
+current-image prediction `5` completed. The rehearsal used a private network,
+disposable PostgreSQL, copies of uploads, and a read-only artifact mount.
+The record confirms scoped cleanup and matching live staging container and
+registry identities. [R6 phase and cleanup verification](../reviews/2026-11-26-w8d4-staging-smoke-r6.md).
+
+### Model rollback
+
+Staging serving follows the registry's `production` pointer. Inspect the
+selection and candidates from a verified read-only snapshot before proposing
+a transition. In the verified release snapshot, both environments select the
+one version listed above and both `rollback_version` fields are null. Model
+rollback stops at target verification until an approved previous selection
+is recorded.
+[Registry-selected serving ADR](../decisions/0008-registry-selected-production-package.md).
+
+A separately approved transition requires workers stopped before the API and
+exclusive registry access. Preserve the existing SQLite registry and
+append-only transition history. Use `ModelRegistry.rollback` with
+`environment=ModelStage.PRODUCTION`, the identified `requested_by` actor, the
+reason, and predeclared `PromotionCriteria`. The service selects the recorded
+rollback version, rechecks gates, and returns an audit attempt ID.
+[Controlled registry ADR](../decisions/0007-controlled-model-registry.md).
+
+The package-validator callback resolves the exact candidate under the
+approved artifact root with `PromotedModelSelection.from_candidate` and loads
+it with `load_promoted_model_package`. The smoke callback runs
+`AnomalyInferenceService(package=package).predict` on a synthetic image and
+returns `SmokeInferenceEvidence` with the actual package ID, score, threshold,
+and label. Record the attempt ID and resulting selection. Use the approved
+artifact snapshot read-only for serving. Restart the API first, verify
+selection, start the worker, and run the separately authorized smoke gate.
+A rejected transition preserves the existing selection. To roll forward the
+model, repeat the separately approved procedure using the registry's
+then-recorded rollback selection and revalidate.
+
+### W8D4 acceptance evidence
+
+| Original criterion | Evidence |
+| --- | --- |
+| Run health, auth, upload, queue, inference, persistence, and result-read smoke checks after deploy | All seven automated stages passed on live staging HTTPS. The review binds the result to owner-scoped PostgreSQL state and the active package. [R5](../reviews/2026-11-21-w8d4-staging-smoke-r5.md). |
+| Define rollback to the previous application and model versions | The recorded digest pair, compatible schema, and guarded model procedure identify their required inputs. The verified registry has no previous model target. |
+| Perform and document one rollback rehearsal | The isolated application rehearsal verified same-job recovery, owner readback, roll-forward, archive checks, and scoped cleanup. [R6](../reviews/2026-11-26-w8d4-staging-smoke-r6.md). |
+| Supply automated smoke and a tested rollback procedure | R5 records the execution of the staging client. R6 records the later isolated application procedure and verification of the exact reviewed subject. |
+| Finish with tests, documentation, and a visible commit | Independent QA `W8D4-QA-2026-11-26-001` passed 105 focused, 507 canonical, and 171 strict PostgreSQL tests. This guide is the documentation delta. The visible commit and merge require human approval. |
+
+The November operational release record uses run
+`vddai-w8d4-rh-20261126144150z`. R6 identifies the execution ledger, digests, and
+cleanup receipt. [Original W8D4 task](https://app.notion.com/p/3ac0ab50ef678177a31ed823994298a9).
 
 ## W9D1 prediction lifecycle logs
 

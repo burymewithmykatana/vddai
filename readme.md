@@ -4,7 +4,7 @@ Production-oriented backend for authenticated, asynchronous visual anomaly
 detection. VDDAI is designed as a reusable pilot platform rather than a
 detector tied to one product category.
 
-> **Status (28 November 2026):** Week 9 implementation merged in [PR #23](https://github.com/burymewithmykatana/vddai/pull/23). The v0.1.0 MVTec AD `tile` pilot has authenticated asynchronous inference, controlled model selection, bounded job admission and recovery, immutable image and single-host staging tooling, and private observability with a verified disposable local workload. **This is a local engineering baseline, not a released or customer-validated pilot.** Live staging smoke, rollback, immutable staging capacity and remaining release conditions are not established by the local evidence.
+> **Status (28 November 2026):** Week 9 implementation merged in [PR #23](https://github.com/burymewithmykatana/vddai/pull/23). The v0.1.0 MVTec AD `tile` pilot has authenticated asynchronous inference, controlled model selection, bounded job admission and recovery, immutable image and single-host staging tooling, and private observability with a verified disposable local workload. **This is a local engineering baseline, not a released or customer-validated pilot.** Earlier W8D4 live staging smoke and isolated application rollback evidence are documented in the [staging runbook](docs/engineering/production-readiness.md#w8d4-staging-smoke-and-supervised-rollback); current-candidate staging verification, immutable staging capacity and remaining release conditions are not established by the local Week 9 evidence.
 
 ## Start Here
 
@@ -599,9 +599,9 @@ Existing database columns remain timezone-naive for compatibility. UTC timestamp
   stale worker from overwriting the authoritative result.
 - Week 9 local observability is implemented, but external alert delivery and
   unattended staging operation are not verified. [Pilot monitoring runbook](docs/engineering/monitoring-runbook.md)
-- Live staging authenticated smoke and rollback evidence, immutable staging
-  capacity, and approved customer-image retention and deletion procedures
-  remain release conditions. See the [risk register](docs/engineering/production-readiness.md#risk-register).
+- Earlier staging smoke and isolated rollback were verified under W8D4.
+  Current-candidate staging verification, immutable staging capacity, and
+  approved customer-image retention and deletion procedures remain release conditions. See the [risk register](docs/engineering/production-readiness.md#risk-register).
 - The strict standard pinned Python audit is not an audit of the exact runtime
   image. The supplemental in-image audit could not resolve the CPU Torch
   build; see the [PR #23 dependency review](docs/reviews/2026-11-28-pr23-dependency-audit.md).
