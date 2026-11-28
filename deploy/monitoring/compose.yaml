@@ -1,0 +1,48 @@
+services:
+  api:
+    environment:
+      METRICS_ENABLED: "true"
+      METRICS_BIND_MODE: container
+      METRICS_API_PORT: "9108"
+
+  worker:
+    environment:
+      METRICS_ENABLED: "true"
+      METRICS_BIND_MODE: container
+      METRICS_WORKER_PORT: "9109"
+
+  prometheus:
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./deploy/monitoring/prometheus:/etc/prometheus:ro
+      - vddai_monitoring_metrics:/prometheus
+
+  grafana:
+    image: grafana/grafana:13.3.2@sha256:81556409ba48b2b922e0adb69a2511337d8ba7578f11962eefa6149a2d815101
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/vddai_grafana_admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+    ports:
+      - "127.0.0.1:3000:3000"
+    secrets:
+      - vddai_grafana_admin
+    volumes:
+      - ./deploy/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - vddai_monitoring_dashboard:/var/lib/grafana
+
+secrets:
+  vddai_grafana_admin:
+    file: ${VDDAI_GRAFANA_PASSWORD_FILE:?Set the path to the protected Grafana admin password file}
+
+volumes:
+  vddai_monitoring_metrics:
+  vddai_monitoring_dashboard:

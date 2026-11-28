@@ -44,6 +44,10 @@ documents:
     area: engineering
     kind: production-readiness
     status: current
+  - path: docs/engineering/monitoring-runbook.md
+    area: engineering
+    kind: runbook
+    status: current
   - path: docs/decisions/0001-product-and-data-strategy.md
     area: decisions
     kind: architecture-decision
@@ -95,8 +99,16 @@ documents:
   - path: docs/decisions/0013-temporary-ecdsa-audit-exception.md
     area: decisions
     kind: architecture-decision
-    status: accepted
+    status: superseded
   - path: docs/decisions/0014-single-host-staging-environment.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted
+  - path: docs/decisions/0015-private-observability.md
+    area: decisions
+    kind: architecture-decision
+    status: accepted
+  - path: docs/decisions/0016-hs256-jwt-provider-and-strict-audit.md
     area: decisions
     kind: architecture-decision
     status: accepted

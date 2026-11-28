@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.contracts.inference import AnomalyInferenceResult, PredictionLabel
 from app.core.config import Settings
+from app.core.logging import LogError, LogEvent, setup_logging
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.prediction import Prediction, PredictionStatus
@@ -14,6 +15,7 @@ from app.services.image_storage_service import ImageStorageError
 from app.services.image_preprocessing_service import ImagePreprocessingService
 from app.tests.image_fixtures import png_with_declared_dimensions
 from app.tests.test_prediction_api import create_model_lineage
+from app.tests.test_structured_logging import read_structured_logs
 from app.workers import prediction_worker
 from app.workers.prediction_worker import (
     PredictionRetryPolicy,
@@ -443,7 +445,9 @@ def test_claim_commit_failure_leaves_job_queued_without_consuming_attempt(
 def test_ambiguous_result_commit_detects_already_completed_row(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    setup_logging()
     now = datetime(2026, 8, 20, 10, 0, 0)
     prediction = create_prediction(db, created_at=now - timedelta(seconds=1))
     real_commit = db.commit
@@ -474,6 +478,19 @@ def test_ambiguous_result_commit_detects_already_completed_row(
     assert persisted.status == PredictionStatus.COMPLETED.value
     assert persisted.attempt_count == 1
     assert persisted.model_version == "package-ambiguous-v1"
+
+    raw, events = read_structured_logs(capsys)
+    assert "connection lost after server commit" not in raw
+    assert not any(event["event"] == LogEvent.TERMINAL_COMMITTED for event in events)
+    assert [event["event"] for event in events[-2:]] == [
+        LogEvent.SETTLEMENT_FAILED,
+        LogEvent.RESULT_OBSERVED,
+    ]
+    assert events[-2]["error_code"] == LogError.RESULT_COMMIT_FAILED
+    observed = events[-1]
+    assert observed["status"] == "completed"
+    assert observed["job_id"] == persisted.id and observed["attempt"] == 1
+    assert observed["model_version"] == persisted.model_version
 
 
 def test_worker_restart_recovers_expired_attempt(
@@ -593,7 +610,10 @@ def test_interruption_after_inference_before_settlement_is_recoverable(
         restart_db.close()
 
 
-def test_stale_attempt_cannot_overwrite_reclaimed_attempt(db: Session) -> None:
+def test_stale_attempt_cannot_overwrite_reclaimed_attempt(
+    db: Session, capsys: pytest.CaptureFixture[str]
+) -> None:
+    setup_logging()
     policy = PredictionRetryPolicy(
         max_attempts=3,
         retry_delay_seconds=5,
@@ -649,6 +669,22 @@ def test_stale_attempt_cannot_overwrite_reclaimed_attempt(db: Session) -> None:
     assert completed.status == PredictionStatus.COMPLETED.value
     assert completed.attempt_count == 2
     assert completed.model_version == "package-current-v1"
+
+    raw, events = read_structured_logs(capsys)
+    assert "package-stale-old-v1" not in raw
+    (terminal,) = [
+        event for event in events if event["event"] == LogEvent.TERMINAL_COMMITTED
+    ]
+    assert terminal["job_id"] == completed.id and terminal["attempt"] == 2
+    assert terminal["model_version"] == completed.model_version
+    discarded = [
+        event for event in events if event["event"] == LogEvent.ATTEMPT_DISCARDED
+    ]
+    assert len(discarded) == 2
+    assert all(
+        event["job_id"] == completed.id and event["attempt"] == 1 for event in discarded
+    )
+    assert all(event["error_code"] == LogError.STALE_ATTEMPT for event in discarded)
 
 
 @pytest.mark.parametrize(

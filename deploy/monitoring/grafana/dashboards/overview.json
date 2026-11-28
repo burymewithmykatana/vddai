@@ -1,0 +1,743 @@
+{
+  "uid": "vddai-overview",
+  "title": "VDDAI pilot overview",
+  "tags": [
+    "vddai",
+    "pilot"
+  ],
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 1,
+      "title": "API readiness",
+      "description": "Private API target and application startup.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "(up{job=\"vddai-api\"} * on(job, instance) vddai_api_ready{job=\"vddai-api\"}) or (up{job=\"vddai-api\"} * 0)",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Unavailable",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Ready",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "noValue": "Unknown"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Worker readiness",
+      "description": "Private worker target and latest complete PostgreSQL queue poll.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "(up{job=\"vddai-worker\"} * on(job, instance) vddai_worker_ready{job=\"vddai-worker\"}) or (up{job=\"vddai-worker\"} * 0)",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Unavailable",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Ready",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "noValue": "Unknown"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Database snapshot",
+      "description": "Queue snapshot from the API scrape. A missing snapshot can also mean an overlapping scrape.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "(up{job=\"vddai-api\"} * on(job, instance) vddai_database_ready{job=\"vddai-api\"}) or (up{job=\"vddai-api\"} * 0)",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Unavailable",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Ready",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "noValue": "Unknown"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Model readiness",
+      "description": "Known worker package state. Unknown before a model event or when the worker target is missing.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "vddai_worker_model_ready{job=\"vddai-worker\"} and on(job, instance) up{job=\"vddai-worker\"} == 1",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Unavailable",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Ready",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "noValue": "Unknown"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "API traffic",
+      "description": "Requests per second by response class, measured over five minutes.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "No sample"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "sum by (status_class) (rate(vddai_http_requests_total{job=\"vddai-api\"}[5m]))",
+          "legendFormat": "{{status_class}}",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Pilot latency p95",
+      "description": "Five-minute histogram estimates for HTTP requests, acknowledged terminal commits, and successful inference.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No sample"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vddai_http_request_duration_seconds_bucket{job=\"vddai-api\"}[5m])))",
+          "legendFormat": "API",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vddai_job_duration_seconds_bucket{job=\"vddai-worker\"}[5m])))",
+          "legendFormat": "Accepted to terminal",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vddai_inference_duration_seconds_bucket{job=\"vddai-worker\"}[5m])))",
+          "legendFormat": "Inference",
+          "range": true,
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Outstanding predictions",
+      "description": "PostgreSQL queue snapshot by state.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No sample"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "vddai_queue_depth{job=\"vddai-api\"}",
+          "legendFormat": "{{state}}",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Oldest prediction by state",
+      "description": "Time since the oldest acceptance in each outstanding state. Missing samples indicate an unavailable snapshot.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No sample"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "vddai_queue_oldest_age_seconds{job=\"vddai-api\"}",
+          "legendFormat": "{{state}}",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Terminal jobs and failed attempts",
+      "description": "Ten-minute committed job outcomes and failed execution attempts. Retries can contribute multiple attempts.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No sample"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "sum by (status) (increase(vddai_job_terminal_total{job=\"vddai-worker\"}[10m]))",
+          "legendFormat": "Job {{status}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "sum by (stage) (increase(vddai_job_execution_failures_total{job=\"vddai-worker\"}[10m]))",
+          "legendFormat": "Attempt {{stage}}",
+          "range": true,
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Upload formats and validation rejects",
+      "description": "One-hour increases from committed uploads and image-validation rejections.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No sample"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "sum by (format) (increase(vddai_upload_accepted_total{job=\"vddai-api\"}[1h]))",
+          "legendFormat": "Upload {{format}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "sum by (status) (increase(vddai_upload_validation_rejected_total{job=\"vddai-api\"}[1h]))",
+          "legendFormat": "Rejected {{status}}",
+          "range": true,
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Input and model quality",
+      "description": "Per-image pixel means, average contrast, and anomaly rate from the bounded worker window.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No sample"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "vddai_quality_pixel_mean{job=\"vddai-worker\"}",
+          "legendFormat": "Mean RGB",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "vddai_quality_pixel_contrast{job=\"vddai-worker\"}",
+          "legendFormat": "Contrast",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "vddai_quality_anomaly_rate{job=\"vddai-worker\"}",
+          "legendFormat": "Anomaly rate",
+          "range": true,
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Quality shift status",
+      "description": "One indicates a crossed matched-reference threshold. Unknown comparisons emit no warning samples. Package identity appears when a scored window exists.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vddai-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No sample"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "vddai_quality_shift_warning{job=\"vddai-worker\"}",
+          "legendFormat": "{{signal}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "vddai_quality_comparison_ready{job=\"vddai-worker\"}",
+          "legendFormat": "Comparison ready",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vddai-prometheus"
+          },
+          "expr": "vddai_quality_package_info{job=\"vddai-worker\"}",
+          "legendFormat": "Package {{package_id}}",
+          "range": true,
+          "refId": "C"
+        }
+      ]
+    }
+  ]
+}

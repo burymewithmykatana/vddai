@@ -28,6 +28,8 @@ class PreprocessedImage:
     original_height: int
     output_width: int
     output_height: int
+    original_format: str | None = None
+    original_mode: str | None = None
 
 
 class ImagePreprocessingService:
@@ -82,6 +84,8 @@ class ImagePreprocessingService:
             with warnings.catch_warnings():
                 warnings.simplefilter("error", Image.DecompressionBombWarning)
                 with Image.open(source) as image:
+                    original_format = image.format
+                    original_mode = image.mode
                     original_width, original_height = image.size
                     enforce_decoded_image_pixel_limit(
                         width=original_width,
@@ -155,6 +159,8 @@ class ImagePreprocessingService:
             original_height=original_height,
             output_width=self.target_width,
             output_height=self.target_height,
+            original_format=original_format,
+            original_mode=original_mode,
         )
 
 

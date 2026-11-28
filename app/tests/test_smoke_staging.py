@@ -11,7 +11,7 @@ import subprocess
 import sys
 from unittest.mock import Mock, call
 
-from jose import jwt
+import jwt
 import pytest
 
 from scripts import smoke_staging as smoke
@@ -96,7 +96,11 @@ class Scenario:
         self.submitted = False
         self.clock = 0.0
         self.tokens = {
-            role: jwt.encode({"sub": str(account["id"])}, "synthetic-signing-key")
+            role: jwt.encode(
+                {"sub": str(account["id"])},
+                "synthetic-signing-key-for-tests-only",
+                algorithm="HS256",
+            )
             for role, account in PROBE_ACCOUNTS.items()
             if role in {"owner", "other"}
         }

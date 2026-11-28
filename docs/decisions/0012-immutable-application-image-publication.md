@@ -66,9 +66,8 @@ success can publish. The isolated publication job has only `contents: read` and
 `GITHUB_TOKEN`. Pull requests, manual dispatches, and any failed, skipped,
 cancelled, or incomplete quality result never publish.
 
-ADR 0013 records the only temporary audit exception. The audit stays strict and
-ignores only the approved exact advisory ID; every other finding blocks the
-quality gate.
+[ADR 0016](0016-hs256-jwt-provider-and-strict-audit.md) retires the temporary
+exception recorded in ADR 0013. Every audit finding blocks the quality gate.
 
 ## Consequences
 

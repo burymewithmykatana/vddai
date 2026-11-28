@@ -1,6 +1,6 @@
 # ADR 0013 — Temporary ECDSA Dependency-Audit Exception
 
-- Status: Accepted
+- Status: Superseded by [ADR 0016](0016-hs256-jwt-provider-and-strict-audit.md)
 - Date: 2026-08-30
 - Scope: W8D2 immutable application image publication
 

@@ -1,0 +1,112 @@
+groups:
+  - name: vddai-pilot
+    rules:
+      - alert: VDDAIApiUnavailable
+        expr: >-
+          up{job="vddai-api"} == 0 or absent(up{job="vddai-api"}) or (up{job="vddai-api"} == 1 unless on(job, instance) vddai_api_ready == 1)
+        for: 1m
+        labels:
+          severity: critical
+          owner: platform
+        annotations:
+          summary: "API is unavailable or has not completed startup"
+          runbook: docs/engineering/monitoring-runbook.md#api-unavailable
+      - alert: VDDAIWorkerUnavailable
+        expr: >-
+          up{job="vddai-worker"} == 0 or absent(up{job="vddai-worker"}) or (up{job="vddai-worker"} == 1 unless on(job, instance) vddai_worker_ready == 1)
+        for: 1m
+        labels:
+          severity: critical
+          owner: platform
+        annotations:
+          summary: "Worker is unavailable or cannot poll the queue"
+          runbook: docs/engineering/monitoring-runbook.md#worker-unavailable
+      - alert: VDDAIDatabaseUnavailable
+        expr: >-
+          up{job="vddai-api"} == 1 unless on(job, instance) vddai_database_ready == 1
+        for: 1m
+        labels:
+          severity: critical
+          owner: platform
+        annotations:
+          summary: "API cannot collect a PostgreSQL queue snapshot"
+          runbook: docs/engineering/monitoring-runbook.md#database-unavailable
+      - alert: VDDAIModelUnavailable
+        expr: >-
+          vddai_worker_model_ready{job="vddai-worker"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          owner: ml
+        annotations:
+          summary: "Worker observed that the serving package is unavailable"
+          runbook: docs/engineering/monitoring-runbook.md#model-unavailable
+      - alert: VDDAIApiErrors
+        expr: >-
+          (
+            sum(rate(vddai_http_requests_total{job="vddai-api",status_class="5xx"}[5m]))
+            / sum(rate(vddai_http_requests_total{job="vddai-api"}[5m]))
+          ) >= 0.02
+          and sum(increase(vddai_http_requests_total{job="vddai-api"}[5m])) >= 20
+        for: 5m
+        labels:
+          severity: warning
+          owner: platform
+        annotations:
+          summary: "API 5xx fraction is at least 2% with sufficient request volume"
+          runbook: docs/engineering/monitoring-runbook.md#sustained-api-errors
+      - alert: VDDAIQueueBacklog
+        expr: >-
+          vddai_queue_oldest_age_seconds{job="vddai-api", state=~"queued|retry_waiting"} > 30
+        for: 5m
+        labels:
+          severity: warning
+          owner: platform
+        annotations:
+          summary: "An outstanding queued or retrying job is older than 30 seconds"
+          runbook: docs/engineering/monitoring-runbook.md#queue-backlog
+      - alert: VDDAITerminalFailures
+        expr: >-
+          sum(increase(vddai_job_terminal_total{job="vddai-worker",status="failed"}[10m])) >= 3
+        for: 1m
+        labels:
+          severity: warning
+          owner: platform
+        annotations:
+          summary: "At least three jobs reached terminal failure in ten minutes"
+          runbook: docs/engineering/monitoring-runbook.md#failed-inference
+      - alert: VDDAIInferenceSlow
+        expr: >-
+          histogram_quantile(0.95, sum by (le) (
+            rate(vddai_inference_duration_seconds_bucket{job="vddai-worker"}[5m])
+          )) > 5
+          and sum(increase(vddai_inference_duration_seconds_count{job="vddai-worker"}[5m])) >= 20
+        for: 5m
+        labels:
+          severity: warning
+          owner: ml
+        annotations:
+          summary: "Inference p95 is over five seconds with sufficient observations"
+          runbook: docs/engineering/monitoring-runbook.md#inference-latency
+      - alert: VDDAIInputQualityShift
+        expr: >-
+          vddai_quality_shift_warning{job="vddai-worker",signal=~"pixel_mean|pixel_contrast|format_mix"} == 1
+          and on(job, instance) vddai_quality_comparison_ready{job="vddai-worker"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          owner: ml
+        annotations:
+          summary: "An input quality signal crossed its matched reference threshold"
+          runbook: docs/engineering/monitoring-runbook.md#input-quality-shift
+      - alert: VDDAIModelQualityShift
+        expr: >-
+          vddai_quality_shift_warning{job="vddai-worker",signal=~"anomaly_rate|score_p95"} == 1
+          and on(job, instance) vddai_quality_comparison_ready{job="vddai-worker"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          owner: ml
+        annotations:
+          summary: "A model output signal crossed its matched reference threshold"
+          runbook: docs/engineering/monitoring-runbook.md#model-quality-shift

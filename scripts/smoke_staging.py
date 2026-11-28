@@ -24,7 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError
 from pydantic import ValidationError
 from app.schemas.prediction import PredictionRead
 from scripts.prove_real_inference import (
@@ -227,8 +228,8 @@ def _login(client: SmokeClient, account: dict[str, Any]) -> str:
     ):
         raise StagingSmokeError("invalid_login")
     try:
-        claims = jwt.get_unverified_claims(token)
-    except JWTError:
+        claims = jwt.decode(token, options={"verify_signature": False})
+    except InvalidTokenError:
         raise StagingSmokeError("invalid_login") from None
     # Compare the subject returned over verified TLS to the operator's ID.
     # The authenticated API requests still validate the token server-side.

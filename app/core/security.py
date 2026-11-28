@@ -2,7 +2,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError
 
 from app.core.config import settings
 
@@ -55,11 +56,10 @@ def create_access_token(
 
 def decode_access_token(token: str) -> dict[str, Any] | None:
     try:
-        payload = jwt.decode(
+        return jwt.decode(
             token,
             settings.JWT_SECRET_KEY,
             algorithms=[ALGORITHM],
         )
-        return payload
-    except JWTError:
+    except (InvalidTokenError, TypeError, ValueError, OverflowError):
         return None
