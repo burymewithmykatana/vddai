@@ -17,9 +17,10 @@ their status or an amendment explicitly says otherwise.
 | [`0010`](0010-database-backed-prediction-reliability.md) | Accepted | Database-backed prediction reliability |
 | [`0011`](0011-database-backed-prediction-admission.md) | Accepted; amended | Database-backed prediction admission and resource guardrails |
 | [`0012`](0012-immutable-application-image-publication.md) | Accepted; amended by ADR 0014 | Immutable application image publication |
-| [`0013`](0013-temporary-ecdsa-audit-exception.md) | Accepted | Temporary ECDSA dependency-audit exception |
+| [`0013`](0013-temporary-ecdsa-audit-exception.md) | Superseded by ADR 0016 | Temporary ECDSA dependency-audit exception |
 | [`0014`](0014-single-host-staging-environment.md) | Accepted | Reproducible single-host staging environment |
 | [`0015`](0015-private-observability.md) | Accepted | Private service metrics |
+| [`0016`](0016-hs256-jwt-provider-and-strict-audit.md) | Accepted | HS256 JWT provider and strict dependency audit |
 
 Create the next zero-padded number for a new decision. Preserve historical
 context, record consequences, and mark replaced decisions as superseded rather

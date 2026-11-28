@@ -434,9 +434,8 @@ dependencies with `pip-audit==2.10.1` and build/inspect the immutable
 application image without publishing it. The audit reports known Python
 dependency vulnerabilities only; it is not an image scan, SBOM, provenance
 attestation, signing mechanism, or application-security proof.
-The audit remains strict except for the exact temporary ECDSA advisory accepted
-in [ADR 0013](docs/decisions/0013-temporary-ecdsa-audit-exception.md); every
-other finding blocks the quality gate.
+The audit runs in strict mode and every reported finding blocks the quality
+gate. [ADR 0016](docs/decisions/0016-hs256-jwt-provider-and-strict-audit.md)
 
 `VDDAI v0.1.0 quality gate` is the stable aggregate check intended for future
 branch protection. It is green only when every mandatory upstream job succeeds;

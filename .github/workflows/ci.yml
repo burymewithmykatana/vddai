@@ -126,8 +126,7 @@ jobs:
       - name: Audit installed Python dependencies
         run: |
           python -m pip install "pip-audit==2.10.1"
-          # ADR 0013 approves only this temporary ecdsa advisory exception.
-          python -m pip_audit --local --strict --ignore-vuln PYSEC-2026-1325
+          python -m pip_audit --local --strict
 
   image:
     name: Application image build

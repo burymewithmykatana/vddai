@@ -69,8 +69,8 @@ application image without publishing it. Another mandatory job audits the
 installed pinned Python environment with `pip-audit==2.10.1`; this is a known
 dependency-vulnerability check, not an operating-system image scan, SBOM,
 provenance attestation, signing mechanism, or proof of application security.
-The audit is strict except for the one exact, temporary ECDSA advisory documented
-in ADR 0013; every other finding remains non-green.
+The audit runs in strict mode and every reported finding blocks the quality
+gate. [ADR 0016](../decisions/0016-hs256-jwt-provider-and-strict-audit.md)
 
 The stable aggregate check is `VDDAI v0.1.0 quality gate`. It succeeds only
 when every required job reports `success`; failure, skip, cancellation, timeout,
