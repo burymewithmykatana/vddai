@@ -13,6 +13,8 @@ broad for one module but does not itself create a new architecture decision.
   authority, and direct-source fallback.
 - [`production-readiness.md`](production-readiness.md): W7D4 production gate,
   required evidence, release conditions, and owner-tagged risk register.
+- [`monitoring-runbook.md`](monitoring-runbook.md): local pilot dashboard,
+  alert response, and application and model rollback checks.
 
 Keep implementation-specific commands in the root README or scripts. Record a
 new ADR when an engineering change alters a durable compatibility boundary.

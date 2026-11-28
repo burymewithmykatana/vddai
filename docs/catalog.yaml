@@ -44,6 +44,10 @@ documents:
     area: engineering
     kind: production-readiness
     status: current
+  - path: docs/engineering/monitoring-runbook.md
+    area: engineering
+    kind: runbook
+    status: current
   - path: docs/decisions/0001-product-and-data-strategy.md
     area: decisions
     kind: architecture-decision
