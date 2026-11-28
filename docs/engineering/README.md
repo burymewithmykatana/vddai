@@ -12,7 +12,8 @@ broad for one module but does not itself create a new architecture decision.
   Graphify structural discovery, freshness validation, purpose-specific
   authority, and direct-source fallback.
 - [`production-readiness.md`](production-readiness.md): W7D4 production gate,
-  required evidence, release conditions, and owner-tagged risk register.
+  W8 delivery, W9 observability and local capacity evidence, release conditions,
+  and owner-tagged risk register.
 - [`monitoring-runbook.md`](monitoring-runbook.md): local pilot dashboard,
   alert response, and application and model rollback checks.
 
